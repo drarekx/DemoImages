@@ -24,7 +24,7 @@ open -a "$PWD/build/DemoImages.app" foto.png   # abrir archivos = importarlos al
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
-`.github/workflows/release.yml` (macos-15) compila con `VERSION` = tag y crea el release con `DemoImages.zip` y `DemoImages.zip.sha256`. `Updater.swift` consulta `releases/latest`, verifica el SHA-256 y el `Info.plist` y cambia el bundle. `build.yml` compila arm64 + x86_64 y verifica que `en` y `ca` tienen las mismas claves y que todo `tr()` está traducido. La app no está notarizada (firma ad-hoc).
+`.github/workflows/release.yml` (macos-14 con Xcode 16; macos-15 se quedaba sin runner) compila con `VERSION` = tag y crea el release con `DemoImages.zip` y `DemoImages.zip.sha256`. `Updater.swift` consulta `releases/latest`, verifica el SHA-256 y el `Info.plist` y cambia el bundle. `build.yml` compila arm64 + x86_64 y verifica que `en` y `ca` tienen las mismas claves y que todo `tr()` está traducido. La app no está notarizada (firma ad-hoc).
 
 ## Estructura (`Sources/DemoImages/`)
 
