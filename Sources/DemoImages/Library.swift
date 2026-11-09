@@ -41,36 +41,75 @@ struct Album: Codable, Identifiable, Hashable {
 enum LibraryError: LocalizedError {
     case notAnImage(String)
     case missingAlbum
+    case locationInsideLibrary
+    case destinationNotEmpty(String)
 
     var errorDescription: String? {
         switch self {
         case .notAnImage(let name): return tr("%@ no es una imagen que se pueda leer.", name)
         case .missingAlbum: return tr("El álbum ya no existe.")
+        case .locationInsideLibrary: return tr("La nueva ubicación no puede estar dentro de la biblioteca actual.")
+        case .destinationNotEmpty(let path): return tr("En %@ ya hay archivos de otra biblioteca a medias. Elige otra carpeta.", path)
         }
     }
 }
 
-/// Albums and their images. Each album is a folder under
-/// `~/Library/Application Support/DemoImages/Albums/<album id>/`; `library.json` keeps
-/// names, order and the measured size of every image.
+/// Albums and their images. Each album is a folder under `<root>/Albums/<album id>/`;
+/// `<root>/library.json` keeps names, order and the measured size of every image.
+/// The root defaults to `~/Library/Application Support/DemoImages` and can be moved
+/// anywhere, e.g. iCloud Drive to share the library between Macs.
 @MainActor
 final class Library: ObservableObject {
     static let shared = Library()
 
     @Published private(set) var albums: [Album] = []
     @Published private(set) var importing = false
+    @Published private(set) var relocating = false
+    /// Where the library lives.
+    @Published private(set) var root: URL
+    /// The root's parent folder is missing (unplugged disk, iCloud Drive turned off).
+    @Published private(set) var unavailable = false
 
-    static let root: URL = FileManager.default
+    /// Modification date of library.json when we last read or wrote it, to notice
+    /// changes made by another Mac through iCloud.
+    private var indexDate: Date?
+
+    static let defaultRoot: URL = FileManager.default
         .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent(AppInfo.name, isDirectory: true)
-    static var albumsDirectory: URL { root.appendingPathComponent("Albums", isDirectory: true) }
-    private var indexURL: URL { Self.root.appendingPathComponent("library.json") }
+
+    /// `~/Library/Mobile Documents/com~apple~CloudDocs`, when iCloud Drive is on.
+    nonisolated static var iCloudDrive: URL? {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private static let rootKey = "libraryPath"
+
+    var albumsDirectory: URL { root.appendingPathComponent("Albums", isDirectory: true) }
+    private var indexURL: URL { root.appendingPathComponent("library.json") }
+
+    var totalBytes: Int64 { albums.reduce(0) { $0 + $1.totalBytes } }
+    var imageCount: Int { albums.reduce(0) { $0 + $1.images.count } }
+    var isInICloud: Bool { Self.isInICloud(root) }
+
+    private init() {
+        root = UserDefaults.standard.string(forKey: Self.rootKey)
+            .map { URL(fileURLWithPath: $0, isDirectory: true) } ?? Self.defaultRoot
+    }
 
     // MARK: - Persistence
 
     func load() {
-        try? FileManager.default.createDirectory(at: Self.albumsDirectory, withIntermediateDirectories: true)
+        albums = []
+        indexDate = nil
+        let fm = FileManager.default
+        unavailable = !fm.fileExists(atPath: root.deletingLastPathComponent().path)
+        guard !unavailable else { return }
+        try? fm.createDirectory(at: albumsDirectory, withIntermediateDirectories: true)
         guard let data = try? Data(contentsOf: indexURL) else { return }
+        indexDate = modificationDate(indexURL)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         do {
@@ -79,31 +118,140 @@ final class Library: ObservableObject {
             NSLog("\(AppInfo.name): could not read library.json: \(error)")
             // Keep the unreadable index aside instead of overwriting it on the next save.
             let backup = indexURL.deletingPathExtension().appendingPathExtension("broken-\(Int(Date().timeIntervalSince1970)).json")
-            try? FileManager.default.moveItem(at: indexURL, to: backup)
+            try? fm.moveItem(at: indexURL, to: backup)
         }
-        // Drop entries whose file was deleted from Finder.
+        // Drop entries whose file was deleted from Finder. Files iCloud has not
+        // downloaded yet still count as present.
         var changed = false
         for index in albums.indices {
             let folder = folder(of: albums[index].id)
             let before = albums[index].images.count
-            albums[index].images.removeAll {
-                !FileManager.default.fileExists(atPath: folder.appendingPathComponent($0.fileName).path)
-            }
+            albums[index].images.removeAll { !Self.fileExists(folder.appendingPathComponent($0.fileName)) }
             changed = changed || albums[index].images.count != before
         }
         if changed { save() }
     }
 
+    /// Re-reads library.json if something else (another Mac, via iCloud) changed it.
+    func reloadIfChangedExternally() {
+        guard !relocating, !importing, let date = modificationDate(indexURL), date != indexDate else { return }
+        load()
+    }
+
     private func save() {
+        guard !unavailable else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         do {
-            try FileManager.default.createDirectory(at: Self.root, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             try encoder.encode(albums).write(to: indexURL, options: .atomic)
+            indexDate = modificationDate(indexURL)
         } catch {
             NSLog("\(AppInfo.name): could not save library.json: \(error)")
         }
+    }
+
+    private func modificationDate(_ url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+    }
+
+    // MARK: - Location
+
+    /// Where a library chosen in `folder` would live, and whether one is already there.
+    /// Picking an unrelated, non-empty folder puts the library in a `DemoImages` subfolder.
+    func target(for folder: URL) -> (url: URL, hasLibrary: Bool) {
+        let fm = FileManager.default
+        let hasLibrary = { (url: URL) in fm.fileExists(atPath: url.appendingPathComponent("library.json").path) }
+        if hasLibrary(folder) { return (folder, true) }
+        let sub = folder.appendingPathComponent(AppInfo.name, isDirectory: true)
+        if hasLibrary(sub) { return (sub, true) }
+        let contents = (try? fm.contentsOfDirectory(atPath: folder.path))?.filter { !$0.hasPrefix(".") } ?? []
+        if folder.lastPathComponent == AppInfo.name || contents.isEmpty { return (folder, false) }
+        return (sub, false)
+    }
+
+    /// Opens the library at `url` and leaves the current one where it is.
+    func open(_ url: URL) {
+        setRoot(url)
+        load()
+    }
+
+    /// Moves the whole library (albums and index) to `target`.
+    func move(to target: URL) async throws {
+        let source = root.standardizedFileURL
+        let destination = target.standardizedFileURL
+        guard destination != source else { return }
+        guard !destination.path.hasPrefix(source.path + "/") else { throw LibraryError.locationInsideLibrary }
+        relocating = true
+        defer { relocating = false }
+        try await Task.detached(priority: .userInitiated) {
+            try Self.moveContents(from: source, to: destination)
+        }.value
+        open(destination)
+    }
+
+    private func setRoot(_ url: URL) {
+        root = url.standardizedFileURL
+        if root == Self.defaultRoot.standardizedFileURL {
+            UserDefaults.standard.removeObject(forKey: Self.rootKey)
+        } else {
+            UserDefaults.standard.set(root.path, forKey: Self.rootKey)
+        }
+    }
+
+    /// Moves `Albums/` then `library.json`; if the index can't follow, the albums go back.
+    nonisolated private static func moveContents(from source: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        let albums = ("Albums", source.appendingPathComponent("Albums"), destination.appendingPathComponent("Albums"))
+        let index = ("library.json", source.appendingPathComponent("library.json"), destination.appendingPathComponent("library.json"))
+        for (_, _, to) in [albums, index] where fm.fileExists(atPath: to.path) {
+            throw LibraryError.destinationNotEmpty(destination.path)
+        }
+        try fm.createDirectory(at: destination, withIntermediateDirectories: true)
+        if fm.fileExists(atPath: albums.1.path) {
+            try fm.moveItem(at: albums.1, to: albums.2)
+        }
+        if fm.fileExists(atPath: index.1.path) {
+            do {
+                try fm.moveItem(at: index.1, to: index.2)
+            } catch {
+                try? fm.moveItem(at: albums.2, to: albums.1)
+                throw error
+            }
+        }
+        // Remove the old folder if nothing else is left in it.
+        let left = (try? fm.contentsOfDirectory(atPath: source.path))?.filter { $0 != ".DS_Store" } ?? []
+        if left.isEmpty { try? fm.removeItem(at: source) }
+    }
+
+    nonisolated static func isInICloud(_ url: URL) -> Bool {
+        guard let drive = iCloudDrive?.standardizedFileURL.path else { return false }
+        return url.standardizedFileURL.path.hasPrefix(drive)
+    }
+
+    /// "iCloud Drive › DemoImages" or "~/Library/Application Support/DemoImages".
+    nonisolated static func displayPath(_ url: URL) -> String {
+        if let drive = iCloudDrive?.standardizedFileURL.path, isInICloud(url) {
+            let rest = url.standardizedFileURL.path.dropFirst(drive.count)
+                .split(separator: "/").joined(separator: " › ")
+            return rest.isEmpty ? "iCloud Drive" : "iCloud Drive › \(rest)"
+        }
+        return (url.path as NSString).abbreviatingWithTildeInPath
+    }
+
+    /// True for files present locally and for iCloud files not downloaded yet.
+    nonisolated static func fileExists(_ url: URL) -> Bool {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.path) { return true }
+        let placeholder = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
+        return fm.fileExists(atPath: placeholder.path)
+    }
+
+    /// Asks iCloud to download a file before it is read (no-op for local files).
+    nonisolated static func requestDownload(_ url: URL) {
+        guard isInICloud(url) else { return }
+        try? FileManager.default.startDownloadingUbiquitousItem(at: url)
     }
 
     // MARK: - Lookup
@@ -119,7 +267,7 @@ final class Library: ObservableObject {
     }
 
     func folder(of albumID: UUID) -> URL {
-        Self.albumsDirectory.appendingPathComponent(albumID.uuidString, isDirectory: true)
+        albumsDirectory.appendingPathComponent(albumID.uuidString, isDirectory: true)
     }
 
     func url(of item: ImageItem, in albumID: UUID) -> URL {

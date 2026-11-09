@@ -226,6 +226,7 @@ enum ImageEncoder {
 
     /// Full-size decode with EXIF orientation applied; metadata is dropped.
     static func loadImage(_ url: URL) throws -> CGImage {
+        Library.requestDownload(url)
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = props[kCGImagePropertyPixelWidth] as? Int,

@@ -43,6 +43,12 @@ struct MainView: View {
         .onChange(of: selection) { _, value in
             if case .album(let id) = value { settings.lastAlbumID = id }
         }
+        .onChange(of: library.root) { _, _ in
+            // Another library was opened: its albums have other IDs.
+            if case .album(let id) = selection, library.album(id) == nil {
+                selection = library.albums.first.map { .album($0.id) }
+            }
+        }
         .onReceive(AppCommands.shared.subject) { command in
             switch command {
             case .newAlbum: promptNewAlbum()
@@ -139,6 +145,7 @@ private struct Sidebar: View {
                 navButton(tr("Ajustes"), "slider.horizontal.3", selected: selection == .settings) {
                     selection = .settings
                 }
+                StorageCard { selection = .settings }
                 Text(tr("Versión %@", Updater.currentVersion))
                     .font(.system(size: 11)).foregroundStyle(Theme.text3)
                     .padding(.horizontal, 10)
@@ -231,6 +238,52 @@ private struct Sidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Where the library is stored and how much it takes, under the sidebar.
+private struct StorageCard: View {
+    let change: () -> Void
+    @ObservedObject private var library = Library.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 7) {
+                Image(systemName: library.unavailable ? "exclamationmark.triangle"
+                      : library.isInICloud ? "icloud" : "internaldrive")
+                    .foregroundStyle(library.unavailable ? Theme.warn : Theme.accentText)
+                    .frame(width: 16)
+                Text(Library.displayPath(library.root))
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+            if library.unavailable {
+                Text(tr("No se encuentra la carpeta."))
+                    .font(.system(size: 11)).foregroundStyle(Theme.warn)
+            } else if library.relocating {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text(tr("Moviendo…"))
+                }
+                .font(.system(size: 11)).foregroundStyle(Theme.text3)
+            } else {
+                Text(tr("%d imágenes · %@", library.imageCount, Format.bytes(library.totalBytes)))
+                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.text3)
+            }
+            HStack(spacing: 6) {
+                Button(tr("Mostrar")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([library.root])
+                }
+                Button(tr("Cambiar…"), action: change)
+            }
+            .buttonStyle(AppButtonStyle(kind: .ghost, height: 24))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Theme.field, in: RoundedRectangle(cornerRadius: 10))
+        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line) }
+        .help(library.root.path)
     }
 }
 

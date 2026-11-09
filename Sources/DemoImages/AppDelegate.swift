@@ -41,6 +41,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         Library.shared.load()
         showMainWindow()
         Updater.shared.start()
+        // Another Mac may have changed an iCloud library while we were in the background.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                               object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { Library.shared.reloadIfChangedExternally() }
+        }
         launched = true
         if !pendingOpen.isEmpty {
             let urls = pendingOpen

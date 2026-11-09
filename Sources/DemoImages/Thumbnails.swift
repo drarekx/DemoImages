@@ -39,6 +39,7 @@ final class ThumbnailCache: @unchecked Sendable {
     }
 
     private static func decode(_ url: URL, maxPixel: Int) -> NSImage? {
+        Library.requestDownload(url)
         guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
