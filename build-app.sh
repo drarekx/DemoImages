@@ -20,6 +20,8 @@ BIN=$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)/$NAME
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$NAME"
+# Icon source: Icon/AppIcon.html, rendered by scripts/make-icon.sh.
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -31,6 +33,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleName</key><string>$NAME</string>
     <key>CFBundleDisplayName</key><string>$NAME</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundleVersion</key><string>$BUILD</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
