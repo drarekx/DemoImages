@@ -23,11 +23,27 @@ struct GalleryView: View {
 
     private var album: Album? { library.album(albumID) }
 
-    /// Filtered and sorted images, in display order.
+    /// Optimized versions whose original is still in the album, grouped by original id.
+    private var versionsByOriginal: [UUID: [ImageItem]] {
+        guard let album else { return [:] }
+        let ids = Set(album.images.map(\.id))
+        return Dictionary(grouping: album.images.filter { $0.sourceID.map(ids.contains) ?? false }, by: { $0.sourceID! })
+    }
+
+    /// Images that are not a version of another image in the album.
+    private var originals: [ImageItem] {
+        guard let album else { return [] }
+        let ids = Set(album.images.map(\.id))
+        return album.images.filter { !($0.sourceID.map(ids.contains) ?? false) }
+    }
+
+    /// Filtered and sorted images, in display order. With grouping on, versions live
+    /// inside their original (badge on the tile, list in the viewer).
     private var items: [ImageItem] {
         guard let album else { return [] }
+        let shown = settings.groupVersions ? originals : album.images
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
-        let filtered = query.isEmpty ? album.images : album.images.filter {
+        let filtered = query.isEmpty ? shown : shown.filter {
             $0.fileName.lowercased().contains(query) || $0.formatLabel.lowercased() == query
         }
         let ascending: [ImageItem]
@@ -114,6 +130,14 @@ struct GalleryView: View {
             Spacer()
             AppTextField(placeholder: tr("Buscar por nombre o formato"), text: $search, icon: "magnifyingglass")
                 .frame(width: 240)
+            Button {
+                optimizing = originals
+            } label: {
+                Label(tr("Optimizar álbum…"), systemImage: "wand.and.stars")
+            }
+            .buttonStyle(.appSecondary)
+            .disabled(originals.isEmpty)
+            .help(tr("Optimiza todas las imágenes originales del álbum"))
             Button(action: chooseFilesToImport) {
                 Label(tr("Añadir imágenes"), systemImage: "plus")
             }
@@ -146,18 +170,18 @@ struct GalleryView: View {
 
             Menu {
                 Section(tr("Carpeta")) {
-                    Button(tr("Copiar a carpeta…")) { export(selection, move: false) }
-                    Button(tr("Mover a carpeta…")) { export(selection, move: true) }
+                    Button(tr("Copiar a carpeta…")) { export(withVersions(selection), move: false) }
+                    Button(tr("Mover a carpeta…")) { export(withVersions(selection), move: true) }
                 }
                 if !otherAlbums.isEmpty {
                     Section(tr("Copiar a álbum")) {
                         ForEach(otherAlbums) { other in
-                            Button(other.name) { transfer(selection, to: other.id, move: false) }
+                            Button(other.name) { transfer(withVersions(selection), to: other.id, move: false) }
                         }
                     }
                     Section(tr("Mover a álbum")) {
                         ForEach(otherAlbums) { other in
-                            Button(other.name) { transfer(selection, to: other.id, move: true) }
+                            Button(other.name) { transfer(withVersions(selection), to: other.id, move: true) }
                         }
                     }
                 }
@@ -174,7 +198,7 @@ struct GalleryView: View {
             .opacity(hasSelection ? 1 : 0.4)
 
             Button {
-                confirmDelete = selection
+                confirmDelete = withVersions(selection)
             } label: {
                 Label(tr("Eliminar"), systemImage: "trash")
             }
@@ -190,6 +214,7 @@ struct GalleryView: View {
                 .pickerStyle(.inline)
                 Divider()
                 Toggle(tr("Descendente"), isOn: $settings.sortDescending)
+                Toggle(tr("Agrupar versiones optimizadas"), isOn: $settings.groupVersions)
             } label: {
                 Label(settings.sort.title, systemImage: "arrow.up.arrow.down")
             }
@@ -220,8 +245,9 @@ struct GalleryView: View {
                 ScrollView {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: size, maximum: size * 1.35), spacing: 16)],
                               alignment: .leading, spacing: 18) {
+                        let versions = versionsByOriginal
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            tile(item, index: index, items: items)
+                            tile(item, index: index, items: items, versions: versions[item.id] ?? [])
                         }
                     }
                     .padding(24)
@@ -263,7 +289,7 @@ struct GalleryView: View {
         }
     }
 
-    private func tile(_ item: ImageItem, index: Int, items: [ImageItem]) -> some View {
+    private func tile(_ item: ImageItem, index: Int, items: [ImageItem], versions: [ImageItem]) -> some View {
         let url = library.url(of: item, in: albumID)
         let selected = selection.contains(item.id)
         return VStack(alignment: .leading, spacing: 6) {
@@ -297,6 +323,8 @@ struct GalleryView: View {
             Text("\(item.dimensions) · \(Format.bytes(item.bytes))")
                 .font(.system(size: 11)).monospacedDigit()
                 .foregroundStyle(Theme.text3)
+            VersionBadge(item: item, versions: settings.groupVersions ? versions : [],
+                         original: library.original(of: item, in: albumID))
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { viewerIndex = index }
@@ -315,7 +343,7 @@ struct GalleryView: View {
         let ids = selection.contains(item.id) ? selection : [item.id]
         let targets = self.items.filter { ids.contains($0.id) }
         let otherAlbums = library.albums.filter { $0.id != albumID }
-        Button(tr("Ver")) { viewerIndex = index }
+        Button(versionsByOriginal[item.id] == nil ? tr("Ver") : tr("Ver con sus versiones")) { viewerIndex = index }
         Button(tr("Mostrar en Finder")) {
             NSWorkspace.shared.activateFileViewerSelecting(targets.map { library.url(of: $0, in: albumID) })
         }
@@ -328,22 +356,22 @@ struct GalleryView: View {
         }
         Divider()
         Button(tr("Optimizar…")) { optimizing = targets }
-        Button(tr("Copiar a carpeta…")) { export(ids, move: false) }
-        Button(tr("Mover a carpeta…")) { export(ids, move: true) }
+        Button(tr("Copiar a carpeta…")) { export(withVersions(ids), move: false) }
+        Button(tr("Mover a carpeta…")) { export(withVersions(ids), move: true) }
         if !otherAlbums.isEmpty {
             Menu(tr("Mover a álbum")) {
                 ForEach(otherAlbums) { other in
-                    Button(other.name) { transfer(ids, to: other.id, move: true) }
+                    Button(other.name) { transfer(withVersions(ids), to: other.id, move: true) }
                 }
             }
             Menu(tr("Copiar a álbum")) {
                 ForEach(otherAlbums) { other in
-                    Button(other.name) { transfer(ids, to: other.id, move: false) }
+                    Button(other.name) { transfer(withVersions(ids), to: other.id, move: false) }
                 }
             }
         }
         Divider()
-        Button(tr("Mover a la papelera"), role: .destructive) { confirmDelete = ids }
+        Button(tr("Mover a la papelera"), role: .destructive) { confirmDelete = withVersions(ids) }
     }
 
     private var emptyState: some View {
@@ -378,6 +406,14 @@ struct GalleryView: View {
         .frame(height: 30)
     }
 
+    /// With grouping on, acting on an original also acts on its versions (they move,
+    /// copy and go to the Trash together).
+    private func withVersions(_ ids: Set<UUID>) -> Set<UUID> {
+        guard settings.groupVersions else { return ids }
+        let versions = versionsByOriginal
+        return ids.union(ids.flatMap { versions[$0]?.map(\.id) ?? [] })
+    }
+
     // MARK: - Selection
 
     private func click(_ item: ImageItem, items: [ImageItem]) {
@@ -406,7 +442,7 @@ struct GalleryView: View {
         }
         switch command {
         case .selectAll: selection = Set(items.map(\.id))
-        case .delete: if !selection.isEmpty { confirmDelete = selection }
+        case .delete: if !selection.isEmpty { confirmDelete = withVersions(selection) }
         case .copy: if !selection.isEmpty { copyToPasteboard(selection) }
         case .paste: pasteFromPasteboard()
         case .importImages: chooseFilesToImport()
@@ -491,6 +527,36 @@ struct GalleryView: View {
 
     private func attempt(_ work: () throws -> Void) {
         do { try work() } catch { message = error.localizedDescription }
+    }
+}
+
+/// Under a tile: "3 versions · best −72 %" on an original, or how much a version saved.
+struct VersionBadge: View {
+    let item: ImageItem
+    let versions: [ImageItem]
+    let original: ImageItem?
+
+    var body: some View {
+        if let best = versions.min(by: { $0.bytes < $1.bytes }) {
+            badge(symbol: "square.stack.3d.up.fill",
+                  text: tr("%d versiones · mejor %@", versions.count, Format.change(from: item.bytes, to: best.bytes)),
+                  good: best.bytes < item.bytes)
+        } else if let info = item.optimization {
+            // A version: compare with its original (or the size it had, if the original is gone).
+            let before = original?.bytes ?? info.sourceBytes
+            badge(symbol: "wand.and.stars",
+                  text: "\(info.codec?.title ?? info.codecID.uppercased()) · \(Format.change(from: before, to: item.bytes))",
+                  good: item.bytes < before)
+        }
+    }
+
+    private func badge(symbol: String, text: String, good: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol).font(.system(size: 9))
+            Text(text).lineLimit(1)
+        }
+        .font(.system(size: 11, weight: .medium)).monospacedDigit()
+        .foregroundStyle(good ? Theme.ok : Theme.warn)
     }
 }
 

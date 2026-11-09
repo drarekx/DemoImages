@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Full-window image viewer over the gallery. ← / → to browse, Esc or Space to close.
+/// Full-window image viewer over the gallery. ← / → to browse images, ↑ / ↓ to go
+/// through the open image's versions, C to compare, Esc or Space to close.
 struct ViewerView: View {
     let albumID: UUID
     let items: [ImageItem]
@@ -12,26 +13,60 @@ struct ViewerView: View {
     @ObservedObject private var library = Library.shared
     @State private var image: NSImage?
     @State private var actualSize = false
+    /// The version shown (nil = the image opened from the grid).
+    @State private var shownID: UUID?
+    @State private var comparing = false
     @FocusState private var focused: Bool
 
     private var item: ImageItem? { items.indices.contains(index) ? items[index] : nil }
 
+    /// The original of the open image (itself, unless it is a version).
+    private var root: ImageItem? {
+        guard let item else { return nil }
+        return library.original(of: item, in: albumID) ?? item
+    }
+
+    /// Original first, then its versions, smallest first.
+    private var group: [ImageItem] {
+        guard let root else { return [] }
+        return [root] + library.versions(of: root.id, in: albumID)
+    }
+
+    private var shown: ItemAndURL? {
+        guard let item else { return nil }
+        let current = group.first { $0.id == (shownID ?? item.id) } ?? item
+        return ItemAndURL(item: current, url: library.url(of: current, in: albumID))
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.94).ignoresSafeArea()
-            if let item {
+            if let shown, let root {
                 VStack(spacing: 0) {
-                    topBar(item)
-                    ZStack {
-                        content(item)
-                        HStack {
-                            arrow("chevron.left", enabled: index > 0) { step(-1) }
-                            Spacer()
-                            arrow("chevron.right", enabled: index < items.count - 1) { step(1) }
+                    topBar(shown.item)
+                    HStack(spacing: 0) {
+                        ZStack {
+                            if comparing && shown.item.id != root.id {
+                                CompareView(original: library.url(of: root, in: albumID), optimized: shown.url,
+                                            originalLabel: tr("Original · %@", Format.bytes(root.bytes)),
+                                            optimizedLabel: "\(shown.item.formatLabel) · \(Format.bytes(shown.item.bytes))")
+                                    .padding(.horizontal, 70)
+                                    .padding(.bottom, 24)
+                            } else {
+                                content(shown.item)
+                            }
+                            HStack {
+                                arrow("chevron.left", enabled: index > 0) { step(-1) }
+                                Spacer()
+                                arrow("chevron.right", enabled: index < items.count - 1) { step(1) }
+                            }
+                            .padding(.horizontal, 16)
                         }
-                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        VersionsPanel(albumID: albumID, root: root, group: group, shownID: shown.item.id,
+                                      comparing: $comparing, select: { shownID = $0 },
+                                      optimize: { optimize(root) })
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
@@ -41,10 +76,13 @@ struct ViewerView: View {
         .onAppear { focused = true }
         .onKeyPress(.leftArrow) { step(-1); return .handled }
         .onKeyPress(.rightArrow) { step(1); return .handled }
+        .onKeyPress(.upArrow) { stepVersion(-1); return .handled }
+        .onKeyPress(.downArrow) { stepVersion(1); return .handled }
         .onKeyPress(.escape) { close(); return .handled }
         .onKeyPress(.space) { close(); return .handled }
         .onKeyPress("0") { actualSize.toggle(); return .handled }
-        .task(id: item.map { "\($0.id)|\($0.fileName)" }) { await load() }
+        .onKeyPress("c") { comparing.toggle(); return .handled }
+        .task(id: shown.map { "\($0.item.id)|\($0.item.fileName)" }) { await load() }
     }
 
     private func topBar(_ item: ImageItem) -> some View {
@@ -64,12 +102,6 @@ struct ViewerView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([library.url(of: item, in: albumID) as NSURL])
             }
-            Button {
-                optimize(item)
-            } label: {
-                Label(tr("Optimizar…"), systemImage: "wand.and.stars")
-            }
-            .buttonStyle(.appSecondary)
             IconButton(symbol: "xmark", label: tr("Cerrar"), kind: .secondary, action: close)
         }
         .padding(.horizontal, 20)
@@ -119,15 +151,134 @@ struct ViewerView: View {
     private func step(_ delta: Int) {
         let next = index + delta
         guard items.indices.contains(next) else { return }
+        shownID = nil
+        comparing = false
         index = next
     }
 
+    private func stepVersion(_ delta: Int) {
+        let group = self.group
+        guard let current = shown?.item.id, let position = group.firstIndex(where: { $0.id == current }) else { return }
+        let next = position + delta
+        guard group.indices.contains(next) else { return }
+        shownID = group[next].id
+    }
+
     private func load() async {
-        guard let item else { return }
-        let url = library.url(of: item, in: albumID)
+        guard let shown else { return }
+        let url = shown.url
         image = ThumbnailCache.shared.cached(url, maxPixel: ThumbnailSize.grid)
         let full = await Task.detached(priority: .userInitiated) { NSImage(contentsOf: url) }.value
-        if self.item?.id == item.id { image = full ?? image }
+        if self.shown?.item.id == shown.item.id { image = full ?? image }
+    }
+}
+
+private struct ItemAndURL {
+    let item: ImageItem
+    let url: URL
+}
+
+/// Right-hand panel: the original and its optimized versions, with sizes and savings.
+private struct VersionsPanel: View {
+    let albumID: UUID
+    let root: ImageItem
+    let group: [ImageItem]
+    let shownID: UUID
+    @Binding var comparing: Bool
+    let select: (UUID) -> Void
+    let optimize: () -> Void
+
+    @ObservedObject private var library = Library.shared
+
+    var body: some View {
+        let versions = Array(group.dropFirst())
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                SectionLabel(tr("Versiones"))
+                Spacer()
+                Text("\(versions.count)").monospacedText(size: 11).foregroundStyle(Theme.text3)
+            }
+            ScrollView {
+                VStack(spacing: 6) {
+                    ForEach(group) { version in
+                        row(version, isOriginal: version.id == root.id)
+                    }
+                }
+            }
+            if versions.isEmpty {
+                Text(tr("Aún no hay versiones optimizadas de esta imagen."))
+                    .font(.system(size: 12)).foregroundStyle(Theme.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let best = versions.min(by: { $0.bytes < $1.bytes }) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(tr("Mejor versión")).font(.system(size: 11)).foregroundStyle(Theme.text3)
+                    Text("\(best.formatLabel) · \(Format.bytes(best.bytes)) · \(Format.change(from: root.bytes, to: best.bytes))")
+                        .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(best.bytes < root.bytes ? Theme.ok : Theme.warn)
+                    Text(tr("Ahorra %@", Format.bytes(max(0, root.bytes - best.bytes))))
+                        .font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.text2)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.field, in: RoundedRectangle(cornerRadius: 8))
+            }
+            if shownID != root.id {
+                Toggle(tr("Comparar con el original (C)"), isOn: $comparing)
+                    .toggleStyle(.switch).controlSize(.small).tint(Theme.accentFill)
+            }
+            Button(action: optimize) {
+                Label(tr("Optimizar…"), systemImage: "wand.and.stars")
+            }
+            .buttonStyle(AppButtonStyle(kind: .secondary, height: 30, fullWidth: true))
+            Text(tr("↑ ↓ cambian de versión"))
+                .font(.system(size: 11)).foregroundStyle(Theme.text3)
+        }
+        .padding(16)
+        .frame(width: 300)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Theme.sidebar.opacity(0.92))
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1) }
+    }
+
+    private func row(_ version: ImageItem, isOriginal: Bool) -> some View {
+        let selected = version.id == shownID
+        return Button {
+            select(version.id)
+        } label: {
+            HStack(spacing: 10) {
+                Checkerboard(square: 5)
+                    .overlay { Thumbnail(url: library.url(of: version, in: albumID), maxPixel: ThumbnailSize.small, version: version.bytes).padding(2) }
+                    .frame(width: 46, height: 46)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(isOriginal ? tr("Original") : version.formatLabel).fontWeight(.semibold)
+                        if isOriginal {
+                            Text(version.formatLabel).foregroundStyle(Theme.text3)
+                        }
+                        Spacer(minLength: 0)
+                        if !isOriginal {
+                            Text(Format.change(from: root.bytes, to: version.bytes))
+                                .fontWeight(.semibold)
+                                .foregroundStyle(version.bytes < root.bytes ? Theme.ok : Theme.warn)
+                        }
+                    }
+                    .font(.system(size: 12)).monospacedDigit()
+                    Text("\(Format.bytes(version.bytes)) · \(version.dimensions)")
+                        .font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.text2)
+                    if let info = version.optimization {
+                        Text(info.summary).font(.system(size: 10)).foregroundStyle(Theme.text3).lineLimit(2)
+                    }
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Theme.accentSoft : .clear, in: RoundedRectangle(cornerRadius: 8))
+            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Theme.accentBorder : Theme.line) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(version.fileName)
     }
 }
 

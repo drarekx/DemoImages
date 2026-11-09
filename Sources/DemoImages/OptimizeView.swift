@@ -15,7 +15,28 @@ struct OptimizeSheet: View {
     @State private var message: String?
 
     private var options: OptimizeOptions { settings.optimize }
-    private var stale: Bool { runner.encodedKey != nil && runner.encodedKey != options.encodingKey }
+    private var stale: Bool {
+        runner.encodedKey != nil && (runner.encodedKey != options.encodingKey || runner.results.count != targets.count)
+    }
+
+    /// The original each image hangs from: optimizing a version links the result to its original.
+    private func root(of item: ImageItem) -> ImageItem {
+        library.original(of: item, in: albumID) ?? item
+    }
+
+    /// Images that already have a version in the chosen format.
+    private var alreadyOptimized: [ImageItem] {
+        items.filter { item in
+            library.versions(of: root(of: item).id, in: albumID).contains { $0.optimization?.codecID == options.codec.rawValue }
+        }
+    }
+
+    /// What gets encoded: all of `items`, or those without a version in this format yet.
+    private var targets: [ImageItem] {
+        guard settings.skipOptimized else { return items }
+        let skip = Set(alreadyOptimized.map(\.id))
+        return items.filter { !skip.contains($0.id) }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -28,6 +49,9 @@ struct OptimizeSheet: View {
             Rectangle().fill(Theme.line).frame(width: 1)
             VStack(spacing: 0) {
                 resultsHeader
+                if !alreadyOptimized.isEmpty {
+                    skipBar
+                }
                 Rectangle().fill(Theme.line).frame(height: 1)
                 if let id = comparing, let result = runner.results.first(where: { $0.id == id }), let output = result.output {
                     compare(result, output: output)
@@ -43,7 +67,10 @@ struct OptimizeSheet: View {
         .foregroundStyle(Theme.text)
         .font(.system(size: 13))
         .preferredColorScheme(.dark)
-        .onAppear(perform: encode)
+        .onAppear {
+            // A whole album can be hundreds of images: wait for "Try" instead of starting at once.
+            if targets.count <= 12 { encode() }
+        }
         .onDisappear { runner.cleanup() }
         .alert(message ?? "", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button(tr("Aceptar")) {}
@@ -55,7 +82,7 @@ struct OptimizeSheet: View {
     private var resultsHeader: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(tr("Optimizar %d imágenes", items.count)).font(.system(size: 16, weight: .semibold))
+                Text(tr("Optimizar %d imágenes", targets.count)).font(.system(size: 16, weight: .semibold))
                 if runner.results.isEmpty || stale {
                     Text(stale ? tr("Los ajustes cambiaron: vuelve a probar para ver el resultado.") : tr("Pulsa «Probar» para ver cuánto ocupan."))
                         .font(.system(size: 12)).foregroundStyle(stale ? Theme.warn : Theme.text3)
@@ -84,6 +111,24 @@ struct OptimizeSheet: View {
         }
         .padding(.horizontal, 20)
         .frame(height: 64)
+    }
+
+    /// "N already have a WebP version" with the switch to skip them.
+    private var skipBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.stack.3d.up").foregroundStyle(Theme.accentText)
+            Text(tr("%d ya tienen una versión %@.", alreadyOptimized.count, options.codec.title))
+                .foregroundStyle(Theme.text2)
+            Spacer()
+            Toggle(tr("Omitirlas"), isOn: $settings.skipOptimized)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .tint(Theme.accentFill)
+        }
+        .font(.system(size: 12))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(Theme.field)
     }
 
     private var resultsList: some View {
@@ -194,9 +239,13 @@ struct OptimizeSheet: View {
     }
 
     private func encode() {
-        guard options.codec.isAvailable, !items.isEmpty else { return }
+        let targets = self.targets
+        guard options.codec.isAvailable, !targets.isEmpty else {
+            runner.reset()
+            return
+        }
         comparing = nil
-        runner.start(items.map { ($0, library.url(of: $0, in: albumID)) }, options: options)
+        runner.start(targets.map { ($0, library.url(of: $0, in: albumID)) }, options: options)
     }
 
     private func save() {
@@ -222,9 +271,14 @@ struct OptimizeSheet: View {
             do {
                 switch options.destination {
                 case .copyInAlbum:
-                    try library.addFile(at: output, into: albumID, name: output.lastPathComponent)
+                    // Linked to the original, so it shows among that image's versions.
+                    let original = root(of: result.item)
+                    try library.addFile(at: output, into: albumID, name: output.lastPathComponent,
+                                        sourceID: original.id,
+                                        optimization: OptimizationInfo(options: options, source: original))
                 case .replace:
-                    try library.replace(result.item.id, in: albumID, with: output, fileExtension: options.codec.fileExtension)
+                    try library.replace(result.item.id, in: albumID, with: output, fileExtension: options.codec.fileExtension,
+                                        optimization: OptimizationInfo(options: options, source: result.item))
                 case .exportFolder:
                     guard let exportDirectory else { continue }
                     let name = Library.uniqueName(output.lastPathComponent, in: exportDirectory)
