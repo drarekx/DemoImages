@@ -203,6 +203,10 @@ struct OptimizeSheet: View {
             CompareView(original: result.source, optimized: output,
                         originalLabel: tr("Original · %@", Format.bytes(result.item.bytes)),
                         optimizedLabel: "\(options.codec.title) · \(Format.bytes(result.outputBytes ?? 0))")
+                .contextMenu {
+                    Button(tr("Copiar original")) { Clipboard.copy([result.source]) }
+                    Button(tr("Copiar optimizada")) { Clipboard.copy([output]) }
+                }
         }
         .padding(16)
         .frame(maxHeight: .infinity)

@@ -496,11 +496,9 @@ struct GalleryView: View {
     }
 
     private func copyToPasteboard(_ ids: Set<UUID>) {
-        let urls = items.filter { ids.contains($0.id) }.map { library.url(of: $0, in: albumID) as NSURL }
+        let urls = (album?.images ?? []).filter { ids.contains($0.id) }.map { library.url(of: $0, in: albumID) }
         guard !urls.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects(urls)
+        Clipboard.copy(urls)
     }
 
     /// ⌘V: image files copied in Finder, or image data (a screenshot copied with ⌃⇧⌘4…).

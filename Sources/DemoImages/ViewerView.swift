@@ -50,6 +50,10 @@ struct ViewerView: View {
                                 CompareView(original: library.url(of: root, in: albumID), optimized: shown.url,
                                             originalLabel: tr("Original · %@", Format.bytes(root.bytes)),
                                             optimizedLabel: "\(shown.item.formatLabel) · \(Format.bytes(shown.item.bytes))")
+                                    .contextMenu {
+                                        Button(tr("Copiar original")) { Clipboard.copy([library.url(of: root, in: albumID)]) }
+                                        Button(tr("Copiar optimizada")) { Clipboard.copy([shown.url]) }
+                                    }
                                     .padding(.horizontal, 70)
                                     .padding(.bottom, 24)
                             } else {
@@ -127,8 +131,7 @@ struct ViewerView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([library.url(of: item, in: albumID)])
             }
             IconButton(symbol: "doc.on.doc", label: tr("Copiar")) {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.writeObjects([library.url(of: item, in: albumID) as NSURL])
+                Clipboard.copy([library.url(of: item, in: albumID)])
             }
             IconButton(symbol: "xmark", label: tr("Cerrar"), kind: .secondary, action: close)
         }
@@ -151,6 +154,7 @@ struct ViewerView: View {
                         .frame(width: CGFloat(item.width) / scale, height: CGFloat(item.height) / scale)
                         .background(Checkerboard())
                         .onDrag { NSItemProvider(contentsOf: shown.url) ?? NSItemProvider() }
+                        .contextMenu { fileMenu(shown.url) }
                 }
             } else {
                 Image(nsImage: image)
@@ -159,12 +163,19 @@ struct ViewerView: View {
                     .scaledToFit()
                     .background(Checkerboard())
                     .onDrag { NSItemProvider(contentsOf: shown.url) ?? NSItemProvider() }
+                    .contextMenu { fileMenu(shown.url) }
                     .padding(.horizontal, 70)
                     .padding(.bottom, 24)
             }
         } else {
             ProgressView()
         }
+    }
+
+    @ViewBuilder
+    private func fileMenu(_ url: URL) -> some View {
+        Button(tr("Copiar")) { Clipboard.copy([url]) }
+        Button(tr("Mostrar en Finder")) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
 
     private func arrow(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -316,6 +327,12 @@ private struct VersionsPanel: View {
         .buttonStyle(.plain)
         // Drag a version out (browser upload, Finder…) without leaving the viewer.
         .onDrag { NSItemProvider(contentsOf: library.url(of: version, in: albumID)) ?? NSItemProvider() }
+        .contextMenu {
+            Button(tr("Copiar")) { Clipboard.copy([library.url(of: version, in: albumID)]) }
+            Button(tr("Mostrar en Finder")) {
+                NSWorkspace.shared.activateFileViewerSelecting([library.url(of: version, in: albumID)])
+            }
+        }
         .help(version.fileName)
     }
 }

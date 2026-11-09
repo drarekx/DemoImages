@@ -277,6 +277,8 @@ private enum Translations {
         "No se encuentra el archivo": "File not found",
         "%d imágenes de la lista no tienen archivo (borradas desde el Finder o aún sin llegar de iCloud).": "%d images in the list have no file (deleted in Finder or not yet arrived from iCloud).",
         "Quitar de la lista": "Remove from List",
+        "Copiar original": "Copy Original",
+        "Copiar optimizada": "Copy Optimized",
     ]
 
     static let ca: [String: String] = [
@@ -496,5 +498,7 @@ private enum Translations {
         "No se encuentra el archivo": "No es troba el fitxer",
         "%d imágenes de la lista no tienen archivo (borradas desde el Finder o aún sin llegar de iCloud).": "%d imatges de la llista no tenen fitxer (esborrades des del Finder o encara sense arribar d'iCloud).",
         "Quitar de la lista": "Treu-les de la llista",
+        "Copiar original": "Copia l'original",
+        "Copiar optimizada": "Copia l'optimitzada",
     ]
 }
