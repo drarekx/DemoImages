@@ -16,9 +16,17 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    # macos-14: macos-15 arm64 runners often sit in the queue until GitHub cancels the job.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+
+      # macos-14 defaults to Xcode 15; use the newest Xcode 16 installed on the image.
+      - name: Select Xcode 16
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
 
       - name: Build (arm64 + x86_64)
         run: swift build -c release --arch arm64 --arch x86_64
