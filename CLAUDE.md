@@ -41,6 +41,7 @@ git tag v1.0.1 && git push origin v1.0.1
 | `OptimizeView.swift` | Hoja de optimizar: ajustes, resultados, comparador, guardar |
 | `SettingsPane.swift` | Ubicación de la biblioteca (`LibraryLocationCard`: iCloud Drive, otra carpeta, por defecto), idioma, actualizaciones, estado de las herramientas |
 | `Settings.swift` | `UserDefaults` (`com.egluu.demoimages`): opciones de optimización, orden, tamaño de miniatura |
+| `Icon/AppIcon.html` | Fuente del icono (diseño A, «Foto sobre cuadros»). `scripts/make-icon.sh` lo renderiza con Chrome headless y genera `Resources/AppIcon.icns` (versionado; `build-app.sh` lo copia al bundle) e `Icon/AppIcon-1024.png` |
 | `Theme.swift` | Colores y controles comunes (estilo oscuro de Wallpy) |
 | `Updater.swift` | Autoactualización desde GitHub Releases con SHA-256 |
 | `Localization.swift` | Idiomas (en, es, ca): `tr()`, `Localizer`, tablas |
