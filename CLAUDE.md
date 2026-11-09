@@ -40,6 +40,7 @@ git tag v1.0.1 && git push origin v1.0.1
 | `ViewerView.swift` | Visor a pantalla completa y `CompareView` (cortinilla antes/después) |
 | `OptimizeView.swift` | Hoja de optimizar: ajustes, resultados, comparador, guardar |
 | `SettingsPane.swift` | Ubicación de la biblioteca (`LibraryLocationCard`: iCloud Drive, otra carpeta, por defecto), idioma, actualizaciones, estado de las herramientas |
+| `Clipboard.swift` | «Copiar»: un elemento con la URL del archivo, sus bytes con su tipo y un PNG, para que pegue tanto en el Finder como en navegadores y documentos |
 | `Settings.swift` | `UserDefaults` (`com.egluu.demoimages`): opciones de optimización, orden, tamaño de miniatura |
 | `Icon/AppIcon.html` | Fuente del icono (diseño A, «Foto sobre cuadros»). `scripts/make-icon.sh` lo renderiza con Chrome headless y genera `Resources/AppIcon.icns` (versionado; `build-app.sh` lo copia al bundle) e `Icon/AppIcon-1024.png` |
 | `Theme.swift` | Colores y controles comunes (estilo oscuro de Wallpy) |
