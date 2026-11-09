@@ -14,6 +14,10 @@ struct ImageItem: Codable, Identifiable, Hashable {
     var height: Int
     /// Uniform type identifier detected by ImageIO (e.g. `public.png`).
     var typeID: String
+    /// The original this file was optimized from, in the same album.
+    var sourceID: UUID? = nil
+    /// How the optimizer made this file (nil for imported files).
+    var optimization: OptimizationInfo? = nil
 
     var name: String { (fileName as NSString).deletingPathExtension }
 
@@ -274,6 +278,17 @@ final class Library: ObservableObject {
         folder(of: albumID).appendingPathComponent(item.fileName)
     }
 
+    /// Optimized versions of an image, smallest first.
+    func versions(of id: UUID, in albumID: UUID) -> [ImageItem] {
+        (album(albumID)?.images ?? []).filter { $0.sourceID == id }.sorted { $0.bytes < $1.bytes }
+    }
+
+    /// The original an optimized version comes from, if it is still in the album.
+    func original(of item: ImageItem, in albumID: UUID) -> ImageItem? {
+        guard let sourceID = item.sourceID else { return nil }
+        return album(albumID)?.images.first { $0.id == sourceID }
+    }
+
     // MARK: - Albums
 
     @discardableResult
@@ -325,7 +340,8 @@ final class Library: ObservableObject {
 
     /// Adds one file (an optimizer result, a pasted image) to the album under `name`.
     @discardableResult
-    func addFile(at source: URL, into albumID: UUID, name: String) throws -> ImageItem {
+    func addFile(at source: URL, into albumID: UUID, name: String,
+                 sourceID: UUID? = nil, optimization: OptimizationInfo? = nil) throws -> ImageItem {
         let index = try index(of: albumID)
         let folder = folder(of: albumID)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -335,9 +351,12 @@ final class Library: ObservableObject {
             try? FileManager.default.removeItem(at: destination)
             throw LibraryError.notAnImage(name)
         }
-        albums[index].images.append(item)
+        var added = item
+        added.sourceID = sourceID
+        added.optimization = optimization
+        albums[index].images.append(added)
         save()
-        return item
+        return added
     }
 
     /// Image files to import: the files themselves and, for folders, every image inside.
@@ -415,6 +434,9 @@ final class Library: ObservableObject {
         let targetFolder = folder(of: targetID)
         try FileManager.default.createDirectory(at: targetFolder, withIntermediateDirectories: true)
         var moved: Set<UUID> = []
+        // Copies get new ids; keep originals and their versions linked when both are copied.
+        var newIDs: [UUID: UUID] = [:]
+        let firstAdded = albums[target].images.count
         for item in albums[source].images where ids.contains(item.id) {
             let from = sourceFolder.appendingPathComponent(item.fileName)
             let name = Self.uniqueName(item.fileName, in: targetFolder)
@@ -427,10 +449,18 @@ final class Library: ObservableObject {
                 try FileManager.default.copyItem(at: from, to: to)
             }
             var copy = item
-            if !move { copy.id = UUID() }
+            if !move {
+                copy.id = UUID()
+                newIDs[item.id] = copy.id
+            }
             copy.fileName = name
             copy.added = Date()
             albums[target].images.append(copy)
+        }
+        for position in firstAdded..<albums[target].images.count {
+            if let old = albums[target].images[position].sourceID, let new = newIDs[old] {
+                albums[target].images[position].sourceID = new
+            }
         }
         if move { albums[source].images.removeAll { moved.contains($0.id) } }
         save()
@@ -463,7 +493,9 @@ final class Library: ObservableObject {
     }
 
     /// Replaces an image's file (optimizer "replace" mode). The old file goes to the Trash.
-    func replace(_ id: UUID, in albumID: UUID, with source: URL, fileExtension: String) throws {
+    /// The item keeps its id, so versions made from it stay linked to it.
+    func replace(_ id: UUID, in albumID: UUID, with source: URL, fileExtension: String,
+                 optimization: OptimizationInfo? = nil) throws {
         let index = try index(of: albumID)
         guard let position = albums[index].images.firstIndex(where: { $0.id == id }) else { return }
         let folder = folder(of: albumID)
@@ -478,6 +510,8 @@ final class Library: ObservableObject {
         guard var item = Self.makeItem(for: newURL) else { throw LibraryError.notAnImage(name) }
         item.id = old.id
         item.added = old.added
+        item.sourceID = old.sourceID
+        item.optimization = optimization ?? old.optimization
         albums[index].images[position] = item
         save()
     }

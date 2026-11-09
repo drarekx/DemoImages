@@ -92,6 +92,50 @@ enum Codec: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// Stored on each file the optimizer writes: what it was made from and how.
+struct OptimizationInfo: Codable, Hashable {
+    /// `Codec` raw value, kept as a string so an unknown future codec never breaks library.json.
+    var codecID: String
+    var quality: Int?
+    var effort: Int?
+    var lossless: Bool
+    var resized: Bool
+    var quantized: Bool
+    var sourceBytes: Int64
+    var sourceFormat: String
+    var sourceDimensions: String
+    var date = Date()
+
+    init(options: OptimizeOptions, source: ImageItem) {
+        let codec = options.codec
+        codecID = codec.rawValue
+        lossless = codec.supportsLossless && options.lossless
+        quality = codec.usesQuality && !lossless ? Int(options.quality.rounded()) : nil
+        effort = codec.effortRange != nil ? options.effort : nil
+        resized = options.resize
+        quantized = codec == .png && options.quantize
+        sourceBytes = source.bytes
+        sourceFormat = source.formatLabel
+        sourceDimensions = source.dimensions
+    }
+
+    var codec: Codec? { Codec(rawValue: codecID) }
+
+    /// "WebP · calidad 75 · esfuerzo 4"
+    var summary: String {
+        var parts = [codec?.title ?? codecID.uppercased()]
+        if lossless {
+            parts.append(tr("sin pérdida"))
+        } else if let quality {
+            parts.append(tr("calidad %d", quality))
+        }
+        if let effort { parts.append(tr("esfuerzo %d", effort)) }
+        if quantized { parts.append(tr("paleta reducida")) }
+        if resized { parts.append(tr("redimensionada")) }
+        return parts.joined(separator: " · ")
+    }
+}
+
 enum OptimizeDestination: String, Codable, CaseIterable {
     /// Add the optimized file next to the original, in the same album.
     case copyInAlbum
