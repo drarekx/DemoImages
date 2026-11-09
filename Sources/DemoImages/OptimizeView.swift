@@ -197,7 +197,7 @@ struct OptimizeSheet: View {
                 .buttonStyle(SmallButton.secondary)
                 Text(result.item.fileName).lineLimit(1).truncationMode(.middle)
                 Spacer()
-                Text(tr("Arrastra para comparar · doble clic para ampliar"))
+                Text(tr("Arrastra la línea para comparar · rueda o pellizco para ampliar · arrastra para moverte"))
                     .font(.system(size: 11)).foregroundStyle(Theme.text3)
             }
             CompareView(original: result.source, optimized: output,

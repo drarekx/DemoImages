@@ -282,7 +282,9 @@ private struct VersionsPanel: View {
     }
 }
 
-/// Before/after split view: drag the divider to compare.
+/// Before/after split view, like Squoosh: drag the divider to compare, zoom towards
+/// the pointer with the mouse wheel or a pinch, pan by dragging the image or with two
+/// fingers, double-click to toggle between fit and real pixels (1:1).
 struct CompareView: View {
     let original: URL
     let optimized: URL
@@ -292,7 +294,18 @@ struct CompareView: View {
     @State private var split: CGFloat = 0.5
     @State private var before: NSImage?
     @State private var after: NSImage?
-    @State private var zoom = false
+    /// 1 = image fitted to the view.
+    @State private var scale: CGFloat = 1
+    /// Pan, in view points.
+    @State private var offset: CGSize = .zero
+    @State private var drag: DragMode?
+
+    private enum DragMode {
+        case divider
+        case pan(from: CGSize)
+    }
+
+    private static let maxScale: CGFloat = 32
 
     var body: some View {
         GeometryReader { proxy in
@@ -300,20 +313,20 @@ struct CompareView: View {
             ZStack {
                 Checkerboard()
                 ZStack {
-                    imageView(after)
-                    imageView(before)
+                    imageLayer(after)
+                    imageLayer(before)
                         .mask(alignment: .leading) {
                             Rectangle().frame(width: size.width * split)
                         }
                 }
-                .scaleEffect(zoom ? 3 : 1, anchor: .center)
                 .clipped()
 
                 Rectangle().fill(.white).frame(width: 2)
                     .position(x: size.width * split, y: size.height / 2)
                     .shadow(radius: 2)
-                Circle().fill(.white).frame(width: 26, height: 26)
-                    .overlay { Image(systemName: "arrow.left.and.right").font(.system(size: 11, weight: .bold)).foregroundStyle(.black) }
+                Circle().fill(.white).frame(width: 30, height: 30)
+                    .overlay { Image(systemName: "arrow.left.and.right").font(.system(size: 12, weight: .bold)).foregroundStyle(.black) }
+                    .shadow(radius: 3)
                     .position(x: size.width * split, y: size.height / 2)
 
                 VStack {
@@ -323,14 +336,22 @@ struct CompareView: View {
                         badge(optimizedLabel)
                     }
                     Spacer()
+                    zoomBar(size)
                 }
                 .padding(10)
             }
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                split = min(1, max(0, value.location.x / max(1, size.width)))
+            .gesture(dragGesture(size))
+            .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { value in
+                toggleZoom(at: value.location, in: size)
             })
-            .onTapGesture(count: 2) { zoom.toggle() }
+            .background {
+                // Wheel and pinch reach SwiftUI as nothing; catch them for this area only.
+                ScrollZoomCatcher { event in
+                    handle(event, in: size)
+                }
+            }
+            .onChange(of: size) { _, _ in clampOffset(size) }
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line) }
@@ -341,10 +362,18 @@ struct CompareView: View {
         }
     }
 
+    // MARK: - Drawing
+
     @ViewBuilder
-    private func imageView(_ image: NSImage?) -> some View {
+    private func imageLayer(_ image: NSImage?) -> some View {
         if let image {
-            Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
+            Image(nsImage: image)
+                .resizable()
+                // Enlarged pixels stay sharp so compression artifacts are visible.
+                .interpolation(scale >= 2 ? .none : .high)
+                .scaledToFit()
+                .scaleEffect(scale)
+                .offset(offset)
         } else {
             ProgressView()
         }
@@ -355,5 +384,214 @@ struct CompareView: View {
             .font(.system(size: 11, weight: .medium)).monospacedDigit()
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func zoomBar(_ size: CGSize) -> some View {
+        HStack(spacing: 2) {
+            zoomButton("minus", tr("Alejar")) { zoom(by: 1 / 1.5, at: center(size), in: size) }
+            Text(zoomLabel(size))
+                .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                .frame(minWidth: 52)
+            zoomButton("plus", tr("Acercar")) { zoom(by: 1.5, at: center(size), in: size) }
+            Rectangle().fill(.white.opacity(0.2)).frame(width: 1, height: 16).padding(.horizontal, 4)
+            Button(tr("Ajustar")) { reset() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+            Button("1:1") { setScale(realPixelScale(size), at: center(size), in: size) }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .help(tr("Píxeles reales"))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .background(.black.opacity(0.7), in: Capsule())
+    }
+
+    private func zoomButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 11, weight: .bold)).frame(width: 28, height: 28)
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: - Gestures
+
+    /// Dragging the divider moves it; dragging anywhere else pans.
+    private func dragGesture(_ size: CGSize) -> some Gesture {
+        // A few points of travel, so a double-click doesn't move the divider.
+        DragGesture(minimumDistance: 3)
+            .onChanged { value in
+                if drag == nil {
+                    let nearDivider = abs(value.startLocation.x - size.width * split) < 22
+                    drag = nearDivider || scale <= 1 ? .divider : .pan(from: offset)
+                }
+                switch drag {
+                case .divider:
+                    split = min(1, max(0, value.location.x / max(1, size.width)))
+                case .pan(let from):
+                    offset = CGSize(width: from.width + value.translation.width,
+                                    height: from.height + value.translation.height)
+                    clampOffset(size)
+                case nil:
+                    break
+                }
+            }
+            .onEnded { _ in drag = nil }
+    }
+
+    private func handle(_ event: ScrollZoomCatcher.Event, in size: CGSize) {
+        switch event {
+        case .magnify(let amount, let location):
+            zoom(by: 1 + amount, at: location, in: size)
+        case .scroll(let dx, let dy, let precise, let location):
+            if precise {
+                // Trackpad: two fingers pan (only when zoomed in).
+                guard scale > 1 else { return }
+                offset = CGSize(width: offset.width + dx, height: offset.height + dy)
+                clampOffset(size)
+            } else {
+                // Mouse wheel: zoom towards the pointer.
+                zoom(by: pow(1.2, max(-5, min(5, dy))), at: location, in: size)
+            }
+        }
+    }
+
+    private func toggleZoom(at point: CGPoint, in size: CGSize) {
+        if scale > 1.01 {
+            reset()
+        } else {
+            setScale(max(2, realPixelScale(size)), at: point, in: size)
+        }
+    }
+
+    // MARK: - Zoom maths
+
+    private func center(_ size: CGSize) -> CGPoint { CGPoint(x: size.width / 2, y: size.height / 2) }
+
+    private func zoom(by factor: CGFloat, at point: CGPoint, in size: CGSize) {
+        setScale(scale * factor, at: point, in: size)
+    }
+
+    /// Changes the scale keeping the image point under `point` where it is.
+    private func setScale(_ newScale: CGFloat, at point: CGPoint, in size: CGSize) {
+        let target = min(Self.maxScale, max(1, newScale))
+        guard target != scale else { return }
+        let c = center(size)
+        let ratio = target / scale
+        offset = CGSize(width: (point.x - c.x) - (point.x - c.x - offset.width) * ratio,
+                        height: (point.y - c.y) - (point.y - c.y - offset.height) * ratio)
+        scale = target
+        if scale <= 1 { offset = .zero }
+        clampOffset(size)
+    }
+
+    private func reset() {
+        withAnimation(.easeOut(duration: 0.15)) {
+            scale = 1
+            offset = .zero
+        }
+    }
+
+    /// Keeps at least part of the image in view.
+    private func clampOffset(_ size: CGSize) {
+        let maxX = size.width * (scale - 1) / 2 + size.width * 0.25
+        let maxY = size.height * (scale - 1) / 2 + size.height * 0.25
+        offset = CGSize(width: min(maxX, max(-maxX, offset.width)),
+                        height: min(maxY, max(-maxY, offset.height)))
+        if scale <= 1 { offset = .zero }
+    }
+
+    /// Size of the original in pixels.
+    private var pixelSize: CGSize? {
+        guard let image = before ?? after else { return nil }
+        if let rep = image.representations.first, rep.pixelsWide > 0, rep.pixelsHigh > 0 {
+            return CGSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+        }
+        return image.size
+    }
+
+    /// Screen pixels per image pixel when fitted.
+    private func fitFactor(_ size: CGSize) -> CGFloat {
+        guard let pixels = pixelSize, pixels.width > 0, pixels.height > 0 else { return 1 }
+        let backing = NSScreen.main?.backingScaleFactor ?? 2
+        return min(size.width / pixels.width, size.height / pixels.height) * backing
+    }
+
+    /// The scale at which one image pixel is one screen pixel.
+    private func realPixelScale(_ size: CGSize) -> CGFloat {
+        1 / max(0.0001, fitFactor(size))
+    }
+
+    /// "100 %" = real pixels.
+    private func zoomLabel(_ size: CGSize) -> String {
+        "\(Int((fitFactor(size) * scale * 100).rounded())) %"
+    }
+}
+
+/// Catches mouse-wheel, trackpad-scroll and pinch events over its area (SwiftUI has no
+/// scroll-wheel gesture on macOS). Uses a local event monitor so it never steals clicks.
+struct ScrollZoomCatcher: NSViewRepresentable {
+    enum Event {
+        /// Location in the view, top-left origin.
+        case scroll(dx: CGFloat, dy: CGFloat, precise: Bool, location: CGPoint)
+        case magnify(amount: CGFloat, location: CGPoint)
+    }
+
+    let onEvent: (Event) -> Void
+
+    func makeNSView(context: Context) -> CatcherView {
+        let view = CatcherView()
+        view.onEvent = onEvent
+        return view
+    }
+
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.onEvent = onEvent
+    }
+
+    static func dismantleNSView(_ view: CatcherView, coordinator: ()) {
+        view.stop()
+    }
+
+    final class CatcherView: NSView {
+        var onEvent: ((Event) -> Void)?
+        private var monitor: Any?
+
+        override var isFlipped: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
+                guard let self, let window = self.window, event.window === window else { return event }
+                let point = self.convert(event.locationInWindow, from: nil)
+                guard self.bounds.contains(point) else { return event }
+                switch event.type {
+                case .magnify:
+                    self.onEvent?(.magnify(amount: event.magnification, location: point))
+                case .scrollWheel:
+                    self.onEvent?(.scroll(dx: event.scrollingDeltaX, dy: event.scrollingDeltaY,
+                                          precise: event.hasPreciseScrollingDeltas, location: point))
+                default:
+                    return event
+                }
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        // Clicks go through to SwiftUI.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
