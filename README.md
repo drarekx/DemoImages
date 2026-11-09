@@ -31,6 +31,7 @@ Requisitos: macOS 14 (Sonoma) o posterior. Apple Silicon o Intel.
 - **Visor** a pantalla completa (doble clic): ← / → para pasar, `0` para ver al 100 %, Esc para cerrar.
 - **Copiar o mover** las seleccionadas a una carpeta del Mac o a otro álbum. ⌘C copia los archivos para pegarlos en Finder o en un formulario web; también se pueden arrastrar fuera de la app.
 - **Optimizar** (como Squoosh): WebP, AVIF, JPEG XL, MozJPEG, PNG (OxiPNG + reducción de paleta) y HEIC, con calidad, esfuerzo, sin pérdida y redimensionado Lanczos. Primero **prueba** y ves el peso antes/después de cada imagen y un **comparador** con cortinilla; luego guardas como copia en el álbum, reemplazas las originales (van a la papelera) o exportas a una carpeta. Por defecto se omiten las que no salen más pequeñas.
+- **Dónde se guardan**: por defecto en el Mac, o en **iCloud Drive** (Ajustes → «Usar iCloud Drive») o en cualquier carpeta. Al cambiar, la biblioteca se mueve entera; si la carpeta ya tiene una biblioteca (por ejemplo, la de otro Mac en iCloud), se abre esa. Debajo de la barra lateral se ve siempre dónde está y cuánto ocupa todo.
 - **Idiomas**: castellano, inglés y catalán.
 
 ### Formatos y herramientas
@@ -48,15 +49,16 @@ Los valores por defecto son los de Squoosh (WebP 75 y esfuerzo 4, AVIF 50 y esfu
 
 ## Dónde guarda las cosas
 
-- Imágenes: `~/Library/Application Support/DemoImages/Albums/<id del álbum>/`
-- Índice de álbumes: `~/Library/Application Support/DemoImages/library.json`
+- Imágenes: `<biblioteca>/Albums/<id del álbum>/`
+- Índice de álbumes: `<biblioteca>/library.json`
+- `<biblioteca>` es `~/Library/Application Support/DemoImages` por defecto, o la carpeta elegida en Ajustes (en iCloud Drive: `iCloud Drive/DemoImages`).
 - Ajustes: `defaults read com.egluu.demoimages`
 
 ## Desinstalar
 
 ```sh
 osascript -e 'quit app "DemoImages"'
-rm -rf /Applications/DemoImages.app ~/Library/Application\ Support/DemoImages
+rm -rf /Applications/DemoImages.app ~/Library/Application\ Support/DemoImages   # y la carpeta de iCloud Drive, si la usabas
 defaults delete com.egluu.demoimages
 ```
 

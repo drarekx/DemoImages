@@ -31,21 +31,21 @@ git tag v1.0.1 && git push origin v1.0.1
 | Archivo | Qué hace |
 |---|---|
 | `main.swift`, `AppDelegate.swift` | Arranque, `AppInfo`, ventana principal, menú principal, `AppCommands` (⌘A/⌘C/⌘V/⌘⌫ sin campo de texto llegan al delegado y se reenvían a la galería), abrir archivos desde Finder/Dock |
-| `Library.swift` | Modelo `Album` / `ImageItem`, `library.json`, importar (carpetas recursivas), mover/copiar entre álbumes y a carpetas, reemplazar, renombrar, papelera |
+| `Library.swift` | Modelo `Album` / `ImageItem`, `library.json`, ubicación configurable (mover / abrir otra, iCloud), importar (carpetas recursivas), mover/copiar entre álbumes y a carpetas, reemplazar, renombrar, papelera |
 | `Thumbnails.swift` | `ThumbnailCache` (ImageIO, cola de 4), vista `Thumbnail`, `Checkerboard` |
 | `Optimizer.swift` | `Codec`, `OptimizeOptions` (valores de Squoosh), `ImageEncoder` (decodificar con orientación, Lanczos en Core Image, cwebp/avifenc/cjxl/MozJPEG/pngquant/oxipng o ImageIO), `OptimizeRunner` (lote en paralelo a una carpeta temporal) |
 | `ExternalTools.swift` | Localiza y ejecuta los codificadores de Homebrew (`ToolProcess`) |
-| `MainView.swift` | Barra lateral de álbumes (soltar archivos sobre un álbum los importa), alertas de crear/renombrar/eliminar |
+| `MainView.swift` | Barra lateral de álbumes (soltar archivos sobre un álbum los importa), tarjeta de ubicación y tamaño total (`StorageCard`), alertas de crear/renombrar/eliminar |
 | `GalleryView.swift` | Cabecera, barra de acciones, cuadrícula con selección múltiple, arrastrar dentro/fuera, menú contextual, pie |
 | `ViewerView.swift` | Visor a pantalla completa y `CompareView` (cortinilla antes/después) |
 | `OptimizeView.swift` | Hoja de optimizar: ajustes, resultados, comparador, guardar |
-| `SettingsPane.swift` | Idioma, actualizaciones, estado de las herramientas, carpeta de la biblioteca |
+| `SettingsPane.swift` | Ubicación de la biblioteca (`LibraryLocationCard`: iCloud Drive, otra carpeta, por defecto), idioma, actualizaciones, estado de las herramientas |
 | `Settings.swift` | `UserDefaults` (`com.egluu.demoimages`): opciones de optimización, orden, tamaño de miniatura |
 | `Theme.swift` | Colores y controles comunes (estilo oscuro de Wallpy) |
 | `Updater.swift` | Autoactualización desde GitHub Releases con SHA-256 |
 | `Localization.swift` | Idiomas (en, es, ca): `tr()`, `Localizer`, tablas |
 
-Datos: `~/Library/Application Support/DemoImages/{library.json,Albums/<uuid>/}`. Temporales: `$TMPDIR/DemoImages-*` (se borran al cerrar la hoja de optimizar y los que tengan más de 12 h al arrancar).
+Datos: `<raíz>/{library.json,Albums/<uuid>/}`. La raíz es `Library.defaultRoot` (`~/Library/Application Support/DemoImages`) o la elegida en Ajustes (clave `libraryPath` en `UserDefaults`; `Library.move(to:)` traslada, `Library.open(_:)` abre otra sin mover). iCloud Drive: `~/Library/Mobile Documents/com~apple~CloudDocs/DemoImages`. Temporales: `$TMPDIR/DemoImages-*` (se borran al cerrar la hoja de optimizar y los que tengan más de 12 h al arrancar).
 
 ## Convenciones
 
@@ -63,6 +63,7 @@ Datos: `~/Library/Application Support/DemoImages/{library.json,Albums/<uuid>/}`.
 - **MozJPEG es keg-only** en Homebrew: su `cjpeg` está en `$(brew --prefix)/opt/mozjpeg/bin`. El `cjpeg` de `bin/` es libjpeg-turbo; no usarlo como si fuera MozJPEG. Entrada en PPM (P6), que lee cualquier `cjpeg`.
 - `UTType.avif` no existe en el SDK de macOS 14: usar `UTType.avifImage` (definido en `Optimizer.swift`).
 - Builds universales (`--arch arm64 --arch x86_64`) necesitan Xcode completo (xcbuild); `build-app.sh` cae a la arquitectura nativa con solo CLT.
+- **Biblioteca en iCloud**: un archivo no descargado no es un archivo borrado. `load()` usa `Library.fileExists` (cuenta los marcadores `.<nombre>.icloud`) para no quitar entradas de `library.json`, y antes de leer se llama a `Library.requestDownload`. Al activarse la app se relee `library.json` si otro Mac lo cambió (`reloadIfChangedExternally`). Dos Mac editando a la vez pueden crear copias en conflicto de `library.json`.
 - `main.swift` envuelve el arranque en `MainActor.assumeIsolated` porque `AppDelegate` es `@MainActor`.
 
 ## Pruebas manuales
