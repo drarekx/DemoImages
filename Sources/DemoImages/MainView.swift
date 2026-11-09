@@ -103,12 +103,12 @@ private struct Sidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Theme.accentFill)
-                    .frame(width: 28, height: 28)
-                    .overlay {
-                        Image(systemName: "photo.stack").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                    }
+                // The bundle's icon (Resources/AppIcon.icns); generic when run with `swift run`.
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 34, height: 34)
+                    .accessibilityHidden(true)
                 Text(AppInfo.name).font(.system(size: 16, weight: .semibold))
             }
             .padding(.horizontal, 8)
