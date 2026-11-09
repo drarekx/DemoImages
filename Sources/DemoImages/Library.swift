@@ -104,36 +104,56 @@ final class Library: ObservableObject {
     }
 
     // MARK: - Persistence
+    //
+    // With the library in iCloud Drive another Mac may write library.json too. Two rules
+    // keep both Macs' work: entries are never dropped because their file is missing (iCloud
+    // often delivers the index before the images), and a save merges with whatever the
+    // other Mac wrote since our last read, using what this Mac changed in between.
+
+    /// Entries this Mac added, deleted or changed since library.json was last read or written.
+    /// Keys: `a:<album>` for albums, `i:<album>:<image>` for images.
+    private var localAdded: Set<String> = []
+    private var localDeleted: Set<String> = []
+    private var localModified: Set<String> = []
+
+    private static func key(_ album: UUID) -> String { "a:\(album.uuidString)" }
+    private static func key(_ album: UUID, _ image: UUID) -> String { "i:\(album.uuidString):\(image.uuidString)" }
 
     func load() {
         albums = []
         indexDate = nil
+        clearLocalChanges()
         let fm = FileManager.default
         unavailable = !fm.fileExists(atPath: root.deletingLastPathComponent().path)
         guard !unavailable else { return }
         try? fm.createDirectory(at: albumsDirectory, withIntermediateDirectories: true)
-        guard let data = try? Data(contentsOf: indexURL) else { return }
-        indexDate = modificationDate(indexURL)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        do {
-            albums = try decoder.decode([Album].self, from: data)
-        } catch {
+        switch readIndex() {
+        case .missing:
+            break
+        case .read(let read, let date):
+            albums = read
+            indexDate = date
+        case .unreadable(let error):
             NSLog("\(AppInfo.name): could not read library.json: \(error)")
             // Keep the unreadable index aside instead of overwriting it on the next save.
             let backup = indexURL.deletingPathExtension().appendingPathExtension("broken-\(Int(Date().timeIntervalSince1970)).json")
             try? fm.moveItem(at: indexURL, to: backup)
         }
-        // Drop entries whose file was deleted from Finder. Files iCloud has not
-        // downloaded yet still count as present.
-        var changed = false
-        for index in albums.indices {
-            let folder = folder(of: albums[index].id)
-            let before = albums[index].images.count
-            albums[index].images.removeAll { !Self.fileExists(folder.appendingPathComponent($0.fileName)) }
-            changed = changed || albums[index].images.count != before
+    }
+
+    private var watchTimer: Timer?
+
+    /// While the app is active and the library is in iCloud, checks every few seconds
+    /// whether another Mac changed library.json (a cheap file-date check).
+    func startWatching() {
+        watchTimer?.invalidate()
+        watchTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                let library = Library.shared
+                guard NSApp.isActive, library.isInICloud else { return }
+                library.reloadIfChangedExternally()
+            }
         }
-        if changed { save() }
     }
 
     /// Re-reads library.json if something else (another Mac, via iCloud) changed it.
@@ -142,18 +162,124 @@ final class Library: ObservableObject {
         load()
     }
 
+    private enum IndexRead {
+        case missing
+        case read([Album], Date?)
+        case unreadable(Error)
+    }
+
+    /// Reads library.json through a file coordinator, so iCloud isn't writing it meanwhile.
+    private func readIndex() -> IndexRead {
+        let url = indexURL
+        Self.requestDownload(url)
+        var result = IndexRead.missing
+        var coordinationError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { url in
+            guard let data = try? Data(contentsOf: url) else { return }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            do {
+                result = .read(try decoder.decode([Album].self, from: data), modificationDate(url))
+            } catch {
+                result = .unreadable(error)
+            }
+        }
+        return result
+    }
+
     private func save() {
         guard !unavailable else { return }
+        // Someone else wrote the index since we last did: fold their changes in first.
+        if let date = modificationDate(indexURL), date != indexDate, case .read(let disk, _) = readIndex() {
+            albums = merge(local: albums, disk: disk)
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            try encoder.encode(albums).write(to: indexURL, options: .atomic)
+            let data = try encoder.encode(albums)
+            var writeError: Error?
+            var coordinationError: NSError?
+            NSFileCoordinator().coordinate(writingItemAt: indexURL, options: .forReplacing, error: &coordinationError) { url in
+                do { try data.write(to: url, options: .atomic) } catch { writeError = error }
+            }
+            if let error = writeError ?? coordinationError { throw error }
             indexDate = modificationDate(indexURL)
+            clearLocalChanges()
         } catch {
             NSLog("\(AppInfo.name): could not save library.json: \(error)")
         }
+    }
+
+    private func clearLocalChanges() {
+        localAdded = []
+        localDeleted = []
+        localModified = []
+    }
+
+    /// Three-way merge of the index: what this Mac changed since its last read wins for
+    /// those entries; everything else follows the copy on disk (the other Mac's changes,
+    /// including its additions and deletions).
+    private func merge(local: [Album], disk: [Album]) -> [Album] {
+        let diskByID = Dictionary(disk.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let localIDs = Set(local.map(\.id))
+        var result: [Album] = []
+        for album in local {
+            let albumKey = Self.key(album.id)
+            guard let other = diskByID[album.id] else {
+                // Not on disk: ours if we just made it, else the other Mac deleted it.
+                if localAdded.contains(albumKey) { result.append(album) }
+                continue
+            }
+            var merged = localModified.contains(albumKey) ? album : other
+            merged.images = mergeImages(album: album.id, local: album.images, disk: other.images)
+            result.append(merged)
+        }
+        for album in disk where !localIDs.contains(album.id) && !localDeleted.contains(Self.key(album.id)) {
+            result.append(album)
+        }
+        return result
+    }
+
+    private func mergeImages(album: UUID, local: [ImageItem], disk: [ImageItem]) -> [ImageItem] {
+        let diskByID = Dictionary(disk.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let localIDs = Set(local.map(\.id))
+        var result: [ImageItem] = []
+        for item in local {
+            let key = Self.key(album, item.id)
+            if let other = diskByID[item.id] {
+                result.append(localModified.contains(key) ? item : other)
+            } else if localAdded.contains(key) {
+                result.append(item)
+            }
+        }
+        for item in disk where !localIDs.contains(item.id) && !localDeleted.contains(Self.key(album, item.id)) {
+            result.append(item)
+        }
+        return result
+    }
+
+    /// Entries whose file is not in the album folder, not even as an iCloud placeholder.
+    var missingCount: Int {
+        albums.reduce(0) { count, album in
+            let folder = folder(of: album.id)
+            return count + album.images.filter { !Self.fileExists(folder.appendingPathComponent($0.fileName)) }.count
+        }
+    }
+
+    /// Removes entries whose file no longer exists (deleted from Finder). Manual only:
+    /// with iCloud a file can simply not have arrived yet.
+    func removeMissing() {
+        for index in albums.indices {
+            let album = albums[index]
+            let folder = folder(of: album.id)
+            for item in album.images where !Self.fileExists(folder.appendingPathComponent(item.fileName)) {
+                localDeleted.insert(Self.key(album.id, item.id))
+            }
+            albums[index].images.removeAll { localDeleted.contains(Self.key(album.id, $0.id)) }
+        }
+        save()
     }
 
     private func modificationDate(_ url: URL) -> Date? {
@@ -297,6 +423,7 @@ final class Library: ObservableObject {
         let album = Album(name: trimmed.isEmpty ? tr("Álbum sin nombre") : trimmed)
         try? FileManager.default.createDirectory(at: folder(of: album.id), withIntermediateDirectories: true)
         albums.append(album)
+        localAdded.insert(Self.key(album.id))
         save()
         return album
     }
@@ -305,6 +432,7 @@ final class Library: ObservableObject {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let index = try? index(of: id) else { return }
         albums[index].name = trimmed
+        localModified.insert(Self.key(id))
         save()
     }
 
@@ -316,6 +444,7 @@ final class Library: ObservableObject {
             try? FileManager.default.trashItem(at: folder, resultingItemURL: nil)
         }
         albums.remove(at: index)
+        localDeleted.insert(Self.key(id))
         save()
     }
 
@@ -334,6 +463,7 @@ final class Library: ObservableObject {
         }.value
         guard let index = try? index(of: albumID) else { return (0, result.failed) }
         albums[index].images += result.items
+        localAdded.formUnion(result.items.map { Self.key(albumID, $0.id) })
         save()
         return (result.items.count, result.failed)
     }
@@ -355,6 +485,7 @@ final class Library: ObservableObject {
         added.sourceID = sourceID
         added.optimization = optimization
         albums[index].images.append(added)
+        localAdded.insert(Self.key(albumID, added.id))
         save()
         return added
     }
@@ -421,6 +552,7 @@ final class Library: ObservableObject {
             try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
             ThumbnailCache.shared.invalidate(url)
         }
+        localDeleted.formUnion(albums[index].images.filter { ids.contains($0.id) }.map { Self.key(albumID, $0.id) })
         albums[index].images.removeAll { ids.contains($0.id) }
         save()
     }
@@ -456,13 +588,18 @@ final class Library: ObservableObject {
             copy.fileName = name
             copy.added = Date()
             albums[target].images.append(copy)
+            localAdded.insert(Self.key(targetID, copy.id))
         }
         for position in firstAdded..<albums[target].images.count {
             if let old = albums[target].images[position].sourceID, let new = newIDs[old] {
                 albums[target].images[position].sourceID = new
+                localModified.insert(Self.key(targetID, albums[target].images[position].id))
             }
         }
-        if move { albums[source].images.removeAll { moved.contains($0.id) } }
+        if move {
+            localDeleted.formUnion(moved.map { Self.key(sourceID, $0) })
+            albums[source].images.removeAll { moved.contains($0.id) }
+        }
         save()
     }
 
@@ -474,6 +611,7 @@ final class Library: ObservableObject {
         var done: Set<UUID> = []
         defer {
             if move && !done.isEmpty {
+                localDeleted.formUnion(done.map { Self.key(albumID, $0) })
                 albums[index].images.removeAll { done.contains($0.id) }
                 save()
             }
@@ -513,6 +651,7 @@ final class Library: ObservableObject {
         item.sourceID = old.sourceID
         item.optimization = optimization ?? old.optimization
         albums[index].images[position] = item
+        localModified.insert(Self.key(albumID, id))
         save()
     }
 
@@ -531,6 +670,7 @@ final class Library: ObservableObject {
         try FileManager.default.moveItem(at: oldURL, to: folder.appendingPathComponent(name))
         ThumbnailCache.shared.invalidate(oldURL)
         albums[index].images[position].fileName = name
+        localModified.insert(Self.key(albumID, id))
         save()
     }
 

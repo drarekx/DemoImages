@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             .store(in: &cancellables)
         removeLeftoverTemporaryFiles()
         Library.shared.load()
+        Library.shared.startWatching()
         showMainWindow()
         Updater.shared.start()
         // Another Mac may have changed an iCloud library while we were in the background.

@@ -142,6 +142,18 @@ private struct LibraryLocationCard: View {
                 }
             }
             .disabled(library.relocating)
+            let missing = library.missingCount
+            if missing > 0 {
+                HStack(spacing: 8) {
+                    Image(systemName: "questionmark.square.dashed").foregroundStyle(Theme.warn)
+                    Text(tr("%d imágenes de la lista no tienen archivo (borradas desde el Finder o aún sin llegar de iCloud).", missing))
+                        .font(.system(size: 12)).foregroundStyle(Theme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button(tr("Quitar de la lista")) { library.removeMissing() }
+                        .buttonStyle(AppButtonStyle(kind: .ghost, height: 26))
+                }
+            }
             Text(tr("Al cambiar de ubicación se mueven los álbumes que ya tienes. En iCloud Drive, la biblioteca se comparte entre tus Mac."))
                 .font(.system(size: 11)).foregroundStyle(Theme.text3)
                 .fixedSize(horizontal: false, vertical: true)

@@ -66,6 +66,7 @@ struct Thumbnail: View {
     var version: Int64 = 0
 
     @State private var image: NSImage?
+    @State private var waiting = false
 
     var body: some View {
         ZStack {
@@ -74,6 +75,17 @@ struct Thumbnail: View {
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
+            } else if waiting {
+                // The file isn't here yet (still coming from iCloud) or was deleted.
+                VStack(spacing: 6) {
+                    Image(systemName: Library.isInICloud(url) ? "icloud.and.arrow.down" : "questionmark.square.dashed")
+                        .font(.system(size: 22))
+                    Text(Library.isInICloud(url) ? tr("Esperando a iCloud") : tr("No se encuentra el archivo"))
+                        .font(.system(size: 10))
+                        .multilineTextAlignment(.center)
+                }
+                .foregroundStyle(Theme.text3)
+                .padding(6)
             } else {
                 ProgressView().controlSize(.small)
             }
@@ -81,8 +93,16 @@ struct Thumbnail: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: "\(url.path)|\(version)") {
             image = ThumbnailCache.shared.cached(url, maxPixel: maxPixel)
-            if image == nil {
+            waiting = false
+            // Retry for a while: iCloud may deliver the file after the library index.
+            var attempt = 0
+            while image == nil && !Task.isCancelled {
                 image = await ThumbnailCache.shared.thumbnail(for: url, maxPixel: maxPixel)
+                guard image == nil else { break }
+                waiting = true
+                attempt += 1
+                guard Library.isInICloud(url), attempt < 100 else { break }
+                try? await Task.sleep(for: .seconds(3))
             }
         }
     }
