@@ -24,7 +24,7 @@ open -a "$PWD/build/DemoImages.app" foto.png   # abrir archivos = importarlos al
 git tag v1.0.1 && git push origin v1.0.1
 ```
 
-`.github/workflows/release.yml` (macos-14 con Xcode 16; macos-15 se quedaba sin runner) compila con `VERSION` = tag y crea el release con `DemoImages.zip` y `DemoImages.zip.sha256`. `Updater.swift` consulta `releases/latest`, verifica el SHA-256 y el `Info.plist` y cambia el bundle. `build.yml` compila arm64 + x86_64 y verifica que `en` y `ca` tienen las mismas claves y que todo `tr()` está traducido. La app no está notarizada (firma ad-hoc).
+`.github/workflows/release.yml` (macos-15) compila con `VERSION` = tag y crea el release con `DemoImages.zip` y `DemoImages.zip.sha256`. `Updater.swift` consulta `releases/latest`, verifica el SHA-256 y el `Info.plist` y cambia el bundle. `build.yml` compila arm64 + x86_64 y verifica que `en` y `ca` tienen las mismas claves y que todo `tr()` está traducido. La app no está notarizada (firma ad-hoc).
 
 ## Estructura (`Sources/DemoImages/`)
 
@@ -64,6 +64,7 @@ Datos: `<raíz>/{library.json,Albums/<uuid>/}`. La raíz es `Library.defaultRoot
 - `UTType.avif` no existe en el SDK de macOS 14: usar `UTType.avifImage` (definido en `Optimizer.swift`).
 - Builds universales (`--arch arm64 --arch x86_64`) necesitan Xcode completo (xcbuild); `build-app.sh` cae a la arquitectura nativa con solo CLT.
 - **Biblioteca en iCloud**: un archivo no descargado no es un archivo borrado. `load()` usa `Library.fileExists` (cuenta los marcadores `.<nombre>.icloud`) para no quitar entradas de `library.json`, y antes de leer se llama a `Library.requestDownload`. Al activarse la app se relee `library.json` si otro Mac lo cambió (`reloadIfChangedExternally`). Dos Mac editando a la vez pueden crear copias en conflicto de `library.json`.
+- **Runners de GitHub**: `macos-14` ya no existe («configuration … is not supported»). En `macos-15` el job puede quedarse en cola hasta que GitHub lo cancela por capacidad; no es un fallo del código: relanzar con `gh run rerun <id>`.
 - `main.swift` envuelve el arranque en `MainActor.assumeIsolated` porque `AppDelegate` es `@MainActor`.
 
 ## Pruebas manuales
