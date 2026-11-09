@@ -268,7 +268,15 @@ private enum Translations {
         "paleta reducida": "reduced palette",
         "redimensionada": "resized",
         "sin pérdida": "lossless",
-        "↑ ↓ cambian de versión": "↑ ↓ switch version",
+        "Versión optimizada": "Optimized version",
+        "%@ que el original (%@)": "%@ vs original (%@)",
+        "· %d versiones optimizadas": "· %d optimized versions",
+        "↑ ↓ cambian de versión · arrastra una fila o la imagen fuera de la app para subirla o guardarla": "↑ ↓ switch version · drag a row or the image out of the app to upload or save it",
+        "Arrastra para usarla en otra app": "Drag to use it in another app",
+        "Esperando a iCloud": "Waiting for iCloud",
+        "No se encuentra el archivo": "File not found",
+        "%d imágenes de la lista no tienen archivo (borradas desde el Finder o aún sin llegar de iCloud).": "%d images in the list have no file (deleted in Finder or not yet arrived from iCloud).",
+        "Quitar de la lista": "Remove from List",
     ]
 
     static let ca: [String: String] = [
@@ -479,6 +487,14 @@ private enum Translations {
         "paleta reducida": "paleta reduïda",
         "redimensionada": "redimensionada",
         "sin pérdida": "sense pèrdua",
-        "↑ ↓ cambian de versión": "↑ ↓ canvien de versió",
+        "Versión optimizada": "Versió optimitzada",
+        "%@ que el original (%@)": "%@ respecte a l'original (%@)",
+        "· %d versiones optimizadas": "· %d versions optimitzades",
+        "↑ ↓ cambian de versión · arrastra una fila o la imagen fuera de la app para subirla o guardarla": "↑ ↓ canvien de versió · arrossega una fila o la imatge fora de l'app per pujar-la o desar-la",
+        "Arrastra para usarla en otra app": "Arrossega per fer-la servir en una altra app",
+        "Esperando a iCloud": "Esperant iCloud",
+        "No se encuentra el archivo": "No es troba el fitxer",
+        "%d imágenes de la lista no tienen archivo (borradas desde el Finder o aún sin llegar de iCloud).": "%d imatges de la llista no tenen fitxer (esborrades des del Finder o encara sense arribar d'iCloud).",
+        "Quitar de la lista": "Treu-les de la llista",
     ]
 }

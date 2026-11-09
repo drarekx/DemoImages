@@ -43,7 +43,7 @@ struct ViewerView: View {
             Color.black.opacity(0.94).ignoresSafeArea()
             if let shown, let root {
                 VStack(spacing: 0) {
-                    topBar(shown.item)
+                    topBar(shown.item, root: root)
                     HStack(spacing: 0) {
                         ZStack {
                             if comparing && shown.item.id != root.id {
@@ -53,7 +53,7 @@ struct ViewerView: View {
                                     .padding(.horizontal, 70)
                                     .padding(.bottom, 24)
                             } else {
-                                content(shown.item)
+                                content(shown)
                             }
                             HStack {
                                 arrow("chevron.left", enabled: index > 0) { step(-1) }
@@ -85,12 +85,40 @@ struct ViewerView: View {
         .task(id: shown.map { "\($0.item.id)|\($0.item.fileName)" }) { await load() }
     }
 
-    private func topBar(_ item: ImageItem) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.fileName).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                Text("\(item.formatLabel) · \(item.dimensions) px · \(Format.bytes(item.bytes)) · \(index + 1)/\(items.count)")
-                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(Theme.text3)
+    /// Says plainly which file is on screen: format, original or version, size, saving, settings.
+    private func topBar(_ item: ImageItem, root: ImageItem) -> some View {
+        let isVersion = item.id != root.id
+        let versionCount = group.count - 1
+        return HStack(spacing: 12) {
+            Text(item.formatLabel)
+                .font(.system(size: 15, weight: .bold)).monospaced()
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .frame(height: 34)
+                .background(isVersion ? Theme.accentFill : Theme.control, in: RoundedRectangle(cornerRadius: 8))
+                .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(isVersion ? .clear : Theme.lineStrong) }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(isVersion ? tr("Versión optimizada") : tr("Original"))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(isVersion ? Theme.accentText : Theme.text2)
+                    Text(item.fileName).font(.system(size: 14, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                }
+                HStack(spacing: 6) {
+                    Text("\(item.dimensions) px · \(Format.bytes(item.bytes))").foregroundStyle(Theme.text)
+                    if isVersion {
+                        Text(tr("%@ que el original (%@)", Format.change(from: root.bytes, to: item.bytes), Format.bytes(root.bytes)))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(item.bytes < root.bytes ? Theme.ok : Theme.warn)
+                        if let info = item.optimization {
+                            Text("· \(info.summary)").foregroundStyle(Theme.text3)
+                        }
+                    } else if versionCount > 0 {
+                        Text(tr("· %d versiones optimizadas", versionCount)).foregroundStyle(Theme.text3)
+                    }
+                    Text("· \(index + 1)/\(items.count)").foregroundStyle(Theme.text3)
+                }
+                .font(.system(size: 12)).monospacedDigit().lineLimit(1)
             }
             Spacer()
             SegmentedControl(options: [(tr("Ajustar"), false), ("100 %", true)], selection: $actualSize)
@@ -110,8 +138,10 @@ struct ViewerView: View {
     }
 
     @ViewBuilder
-    private func content(_ item: ImageItem) -> some View {
+    private func content(_ shown: ItemAndURL) -> some View {
+        let item = shown.item
         if let image {
+            // Drag the image out (browser upload, Finder…): it carries the file on screen.
             if actualSize {
                 let scale = NSScreen.main?.backingScaleFactor ?? 2
                 ScrollView([.horizontal, .vertical]) {
@@ -120,6 +150,7 @@ struct ViewerView: View {
                         .interpolation(.none)
                         .frame(width: CGFloat(item.width) / scale, height: CGFloat(item.height) / scale)
                         .background(Checkerboard())
+                        .onDrag { NSItemProvider(contentsOf: shown.url) ?? NSItemProvider() }
                 }
             } else {
                 Image(nsImage: image)
@@ -127,6 +158,7 @@ struct ViewerView: View {
                     .interpolation(.high)
                     .scaledToFit()
                     .background(Checkerboard())
+                    .onDrag { NSItemProvider(contentsOf: shown.url) ?? NSItemProvider() }
                     .padding(.horizontal, 70)
                     .padding(.bottom, 24)
             }
@@ -230,8 +262,9 @@ private struct VersionsPanel: View {
                 Label(tr("Optimizar…"), systemImage: "wand.and.stars")
             }
             .buttonStyle(AppButtonStyle(kind: .secondary, height: 30, fullWidth: true))
-            Text(tr("↑ ↓ cambian de versión"))
+            Text(tr("↑ ↓ cambian de versión · arrastra una fila o la imagen fuera de la app para subirla o guardarla"))
                 .font(.system(size: 11)).foregroundStyle(Theme.text3)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .frame(width: 300)
@@ -270,6 +303,9 @@ private struct VersionsPanel: View {
                         Text(info.summary).font(.system(size: 10)).foregroundStyle(Theme.text3).lineLimit(2)
                     }
                 }
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 11)).foregroundStyle(Theme.text3)
+                    .help(tr("Arrastra para usarla en otra app"))
             }
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -278,6 +314,8 @@ private struct VersionsPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Drag a version out (browser upload, Finder…) without leaving the viewer.
+        .onDrag { NSItemProvider(contentsOf: library.url(of: version, in: albumID)) ?? NSItemProvider() }
         .help(version.fileName)
     }
 }
