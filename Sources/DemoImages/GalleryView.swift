@@ -81,6 +81,17 @@ struct GalleryView: View {
             }
         }
         .onReceive(AppCommands.shared.subject) { handle($0) }
+        .background {
+            // Space opens the selected image, like Quick Look in the Finder.
+            KeyCatcher { event in
+                guard event.keyCode == KeyCatcher.space else { return false }
+                // A held key must not open and close the viewer over and over.
+                if event.isARepeat { return true }
+                guard viewerIndex == nil, optimizing == nil, let index = selectedIndex(in: items) else { return false }
+                viewerIndex = index
+                return true
+            }
+        }
         .sheet(item: Binding(get: { optimizing.map(OptimizeBatch.init) }, set: { optimizing = $0?.items })) { batch in
             OptimizeSheet(albumID: albumID, items: batch.items) { optimizing = nil }
         }
@@ -410,7 +421,7 @@ struct GalleryView: View {
                 Text(tr("%d seleccionadas · %@", selected.count, Format.bytes(selected.reduce(0) { $0 + $1.bytes })))
             }
             Spacer()
-            Text(tr("Doble clic para ver · arrastra una imagen fuera para usarla en otra app"))
+            Text(tr("Doble clic o Espacio para ver · arrastra una imagen fuera para usarla en otra app"))
         }
         .font(.system(size: 11))
         .foregroundStyle(Theme.text3)
@@ -429,6 +440,8 @@ struct GalleryView: View {
     // MARK: - Selection
 
     private func click(_ item: ImageItem, items: [ImageItem]) {
+        // Leave the search field, so Space and ⌘A act on the grid again.
+        NSApp.keyWindow?.makeFirstResponder(nil)
         let flags = NSEvent.modifierFlags
         if flags.contains(.command) {
             if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }
@@ -441,6 +454,14 @@ struct GalleryView: View {
             selection = [item.id]
             anchor = item.id
         }
+    }
+
+    /// The selected image to open: the last one clicked, or the first of the selection.
+    private func selectedIndex(in items: [ImageItem]) -> Int? {
+        if let anchor, selection.contains(anchor), let index = items.firstIndex(where: { $0.id == anchor }) {
+            return index
+        }
+        return items.firstIndex { selection.contains($0.id) }
     }
 
     // MARK: - Commands
@@ -567,6 +588,55 @@ struct VersionBadge: View {
         }
         .font(.system(size: 11, weight: .medium)).monospacedDigit()
         .foregroundStyle(good ? Theme.ok : Theme.warn)
+    }
+}
+
+/// Catches plain key presses in its window while no text is being edited and no sheet
+/// is open (SwiftUI's `onKeyPress` needs focus, which the grid never has). The handler
+/// returns true to swallow the key. Uses a local event monitor, like `ScrollZoomCatcher`.
+struct KeyCatcher: NSViewRepresentable {
+    static let space: UInt16 = 49
+
+    let onKey: (NSEvent) -> Bool
+
+    func makeNSView(context: Context) -> CatcherView {
+        let view = CatcherView()
+        view.onKey = onKey
+        return view
+    }
+
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.onKey = onKey
+    }
+
+    static func dismantleNSView(_ view: CatcherView, coordinator: ()) {
+        view.stop()
+    }
+
+    final class CatcherView: NSView {
+        var onKey: ((NSEvent) -> Bool)?
+        private var monitor: Any?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let window = self.window, event.window === window,
+                      window.attachedSheet == nil,
+                      !(window.firstResponder is NSText),
+                      event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                      self.onKey?(event) == true else { return event }
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 
