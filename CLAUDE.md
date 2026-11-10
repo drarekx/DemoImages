@@ -37,7 +37,7 @@ git tag v1.0.1 && git push origin v1.0.1
 | `Video.swift` | Vídeos con AVFoundation: `VideoFile` (tipo, tamaño, duración, fotogramas), `VideoOptions` / `VideoEncoder` (HEVC o H.264 con presets de `AVAssetExportSession`), `VideoPlayerView` (AVKit) |
 | `ExternalTools.swift` | Localiza y ejecuta los codificadores de Homebrew (`ToolProcess`) |
 | `MainView.swift` | Barra lateral de álbumes (soltar archivos sobre un álbum los importa), tarjeta de ubicación y tamaño total (`StorageCard`), alertas de crear/renombrar/eliminar |
-| `GalleryView.swift` | Cabecera, barra de acciones, cuadrícula con selección múltiple, arrastrar dentro/fuera, menú contextual, pie |
+| `GalleryView.swift` | Cabecera, barra de acciones, cuadrícula con selección múltiple, arrastrar dentro/fuera, menú contextual, pie, `KeyCatcher` (Espacio abre la seleccionada en el visor; monitor local de teclado porque la cuadrícula nunca tiene foco) |
 | `ViewerView.swift` | Visor a pantalla completa (reproduce vídeos; Espacio = reproducir/pausar) y `CompareView` (cortinilla antes/después; en vídeos, de un fotograma vía `MediaImage`) |
 | `OptimizeView.swift` | Hoja de optimizar: ajustes de imagen (`OptimizeSettingsForm`) o de vídeo (`VideoSettingsForm`), selector Imágenes/Vídeos en lotes mixtos, `SaveSettings` común, resultados, comparador, guardar |
 | `SettingsPane.swift` | Ubicación de la biblioteca (`LibraryLocationCard`: iCloud Drive, otra carpeta, por defecto), idioma, actualizaciones, estado de las herramientas |

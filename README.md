@@ -39,7 +39,7 @@ Requisitos: macOS 14 (Sonoma) o posterior. Apple Silicon o Intel.
 
 ![Visor con el original y sus versiones optimizadas](docs/screenshots/visor.webp)
 
-- **Visor** a pantalla completa (doble clic): ← / → para pasar, `0` para ver al 100 %, Esc para cerrar. Arriba se ve claramente qué archivo es (formato, original o versión, tamaño, % frente al original y ajustes).
+- **Visor** a pantalla completa (doble clic, o Espacio con una imagen seleccionada, como la Vista Rápida del Finder): ← / → para pasar, `0` para ver al 100 %, Esc o Espacio para cerrar. Arriba se ve claramente qué archivo es (formato, original o versión, tamaño, % frente al original y ajustes).
 - **Versiones**: cada archivo optimizado como copia queda enlazado a su original. El panel de la derecha muestra el original y todas sus versiones con tamaño, % de ahorro y ajustes usados; ↑ / ↓ cambian de versión y C la compara con el original.
 - La imagen y cada fila del panel se pueden **arrastrar fuera** de la app (a un formulario web, al Finder…).
 - En la galería las versiones se agrupan dentro del original (se puede desagrupar desde el menú de orden). Mover, copiar o borrar un original arrastra sus versiones.
