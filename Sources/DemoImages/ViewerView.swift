@@ -1,8 +1,10 @@
+import AVFoundation
 import AppKit
 import SwiftUI
 
-/// Full-window image viewer over the gallery. ← / → to browse images, ↑ / ↓ to go
-/// through the open image's versions, C to compare, Esc or Space to close.
+/// Full-window viewer over the gallery. ← / → to browse, ↑ / ↓ to go through the open
+/// file's versions, C to compare, Esc or Space to close. Videos play in place and
+/// Space plays or pauses them.
 struct ViewerView: View {
     let albumID: UUID
     let items: [ImageItem]
@@ -12,6 +14,8 @@ struct ViewerView: View {
 
     @ObservedObject private var library = Library.shared
     @State private var image: NSImage?
+    /// Set while a video is on screen.
+    @State private var player: AVPlayer?
     @State private var actualSize = false
     /// The version shown (nil = the image opened from the grid).
     @State private var shownID: UUID?
@@ -83,9 +87,12 @@ struct ViewerView: View {
         .onKeyPress(.upArrow) { stepVersion(-1); return .handled }
         .onKeyPress(.downArrow) { stepVersion(1); return .handled }
         .onKeyPress(.escape) { close(); return .handled }
-        .onKeyPress(.space) { close(); return .handled }
+        .onKeyPress(.space) { togglePlaybackOrClose(); return .handled }
         .onKeyPress("0") { actualSize.toggle(); return .handled }
         .onKeyPress("c") { comparing.toggle(); return .handled }
+        // The comparison shows a still frame: stop the video (and its sound) behind it.
+        .onChange(of: comparing) { _, comparing in if comparing { player?.pause() } }
+        .onDisappear { player?.pause() }
         .task(id: shown.map { "\($0.item.id)|\($0.item.fileName)" }) { await load() }
     }
 
@@ -110,6 +117,9 @@ struct ViewerView: View {
                 }
                 HStack(spacing: 6) {
                     Text("\(item.dimensions) px · \(Format.bytes(item.bytes))").foregroundStyle(Theme.text)
+                    if let duration = item.duration {
+                        Text("· \(Format.duration(duration))").foregroundStyle(Theme.text3)
+                    }
                     if isVersion {
                         Text(tr("%@ que el original (%@)", Format.change(from: root.bytes, to: item.bytes), Format.bytes(root.bytes)))
                             .fontWeight(.semibold)
@@ -125,8 +135,10 @@ struct ViewerView: View {
                 .font(.system(size: 12)).monospacedDigit().lineLimit(1)
             }
             Spacer()
-            SegmentedControl(options: [(tr("Ajustar"), false), ("100 %", true)], selection: $actualSize)
-                .help(tr("Tecla 0"))
+            if !item.isVideo {
+                SegmentedControl(options: [(tr("Ajustar"), false), ("100 %", true)], selection: $actualSize)
+                    .help(tr("Tecla 0"))
+            }
             IconButton(symbol: "folder", label: tr("Mostrar en Finder")) {
                 NSWorkspace.shared.activateFileViewerSelecting([library.url(of: item, in: albumID)])
             }
@@ -143,7 +155,15 @@ struct ViewerView: View {
     @ViewBuilder
     private func content(_ shown: ItemAndURL) -> some View {
         let item = shown.item
-        if let image {
+        if item.isVideo {
+            if let player {
+                VideoPlayerView(player: player)
+                    .padding(.horizontal, 70)
+                    .padding(.bottom, 24)
+            } else {
+                ProgressView()
+            }
+        } else if let image {
             // Drag the image out (browser upload, Finder…): it carries the file on screen.
             if actualSize {
                 let scale = NSScreen.main?.backingScaleFactor ?? 2
@@ -207,9 +227,32 @@ struct ViewerView: View {
         shownID = group[next].id
     }
 
+    private func togglePlaybackOrClose() {
+        guard let player, !comparing else { return close() }
+        if player.rate == 0 {
+            // Start over if it had reached the end.
+            if let end = player.currentItem?.duration, end.isNumeric, player.currentTime() >= end {
+                player.seek(to: .zero)
+            }
+            player.play()
+        } else {
+            player.pause()
+        }
+    }
+
     private func load() async {
+        player?.pause()
+        player = nil
         guard let shown else { return }
         let url = shown.url
+        if shown.item.isVideo {
+            image = nil
+            Library.requestDownload(url)
+            let player = AVPlayer(url: url)
+            self.player = player
+            if !comparing { player.play() }
+            return
+        }
         image = ThumbnailCache.shared.cached(url, maxPixel: ThumbnailSize.grid)
         let full = await Task.detached(priority: .userInitiated) { NSImage(contentsOf: url) }.value
         if self.shown?.item.id == shown.item.id { image = full ?? image }
@@ -249,7 +292,8 @@ private struct VersionsPanel: View {
                 }
             }
             if versions.isEmpty {
-                Text(tr("Aún no hay versiones optimizadas de esta imagen."))
+                Text(root.isVideo ? tr("Aún no hay versiones optimizadas de este vídeo.")
+                                  : tr("Aún no hay versiones optimizadas de esta imagen."))
                     .font(.system(size: 12)).foregroundStyle(Theme.text3)
                     .fixedSize(horizontal: false, vertical: true)
             } else if let best = versions.min(by: { $0.bytes < $1.bytes }) {
@@ -266,7 +310,8 @@ private struct VersionsPanel: View {
                 .background(Theme.field, in: RoundedRectangle(cornerRadius: 8))
             }
             if shownID != root.id {
-                Toggle(tr("Comparar con el original (C)"), isOn: $comparing)
+                Toggle(root.isVideo ? tr("Comparar un fotograma con el original (C)") : tr("Comparar con el original (C)"),
+                       isOn: $comparing)
                     .toggleStyle(.switch).controlSize(.small).tint(Theme.accentFill)
             }
             Button(action: optimize) {
@@ -337,7 +382,7 @@ private struct VersionsPanel: View {
     }
 }
 
-/// Before/after split view, like Squoosh: drag the divider to compare, zoom towards
+/// Before/after split view, like Squoosh (for videos, of one frame): drag the divider to compare, zoom towards
 /// the pointer with the mouse wheel or a pinch, pan by dragging the image or with two
 /// fingers, double-click to toggle between fit and real pixels (1:1).
 struct CompareView: View {
@@ -412,8 +457,8 @@ struct CompareView: View {
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line) }
         .task(id: optimized) {
             let (a, b) = (original, optimized)
-            before = await Task.detached { NSImage(contentsOf: a) }.value
-            after = await Task.detached { NSImage(contentsOf: b) }.value
+            before = await MediaImage.load(a)
+            after = await MediaImage.load(b)
         }
     }
 

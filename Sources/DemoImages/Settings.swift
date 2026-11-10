@@ -20,6 +20,7 @@ final class Settings: ObservableObject {
     private let defaults = UserDefaults.standard
 
     @Published var optimize: OptimizeOptions { didSet { save(optimize, "optimizeOptions") } }
+    @Published var optimizeVideo: VideoOptions { didSet { save(optimizeVideo, "optimizeVideoOptions") } }
     @Published var sort: GallerySort { didSet { defaults.set(sort.rawValue, forKey: "gallerySort") } }
     @Published var sortDescending: Bool { didSet { defaults.set(sortDescending, forKey: "sortDescending") } }
     /// Grid tile width in points.
@@ -35,6 +36,8 @@ final class Settings: ObservableObject {
                                      "groupVersions": true, "skipOptimized": true])
         optimize = defaults.data(forKey: "optimizeOptions")
             .flatMap { try? JSONDecoder().decode(OptimizeOptions.self, from: $0) } ?? OptimizeOptions()
+        optimizeVideo = defaults.data(forKey: "optimizeVideoOptions")
+            .flatMap { try? JSONDecoder().decode(VideoOptions.self, from: $0) } ?? VideoOptions()
         sort = GallerySort(rawValue: defaults.string(forKey: "gallerySort") ?? "") ?? .added
         sortDescending = defaults.bool(forKey: "sortDescending")
         tileSize = defaults.double(forKey: "tileSize")

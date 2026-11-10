@@ -47,6 +47,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
             <key>LSHandlerRank</key><string>Alternate</string>
             <key>LSItemContentTypes</key><array><string>public.image</string></array>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key><string>Video</string>
+            <key>CFBundleTypeRole</key><string>Viewer</string>
+            <key>LSHandlerRank</key><string>Alternate</string>
+            <key>LSItemContentTypes</key><array><string>public.movie</string></array>
+        </dict>
     </array>
 </dict>
 </plist>

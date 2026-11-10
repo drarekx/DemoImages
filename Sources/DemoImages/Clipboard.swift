@@ -6,8 +6,9 @@ import UniformTypeIdentifiers
 enum Clipboard {
     static func copy(_ urls: [URL], to pasteboard: NSPasteboard = .general) {
         pasteboard.clearContents()
-        guard urls.count == 1, let url = urls.first else {
-            // Several files: Finder-style file list.
+        guard urls.count == 1, let url = urls.first, !VideoFile.isVideo(url) else {
+            // Several files, or a video (too big to put its bytes on the pasteboard):
+            // Finder-style file list.
             pasteboard.writeObjects(urls.map { $0 as NSURL })
             return
         }

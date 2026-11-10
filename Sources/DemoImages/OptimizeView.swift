@@ -13,10 +13,30 @@ struct OptimizeSheet: View {
     @StateObject private var runner = OptimizeRunner()
     @State private var comparing: UUID?
     @State private var message: String?
+    /// Images and videos have different settings; a mixed batch does one kind at a time.
+    @State private var videoChoice: Bool?
+
+    private var images: [ImageItem] { items.filter { !$0.isVideo } }
+    private var videos: [ImageItem] { items.filter(\.isVideo) }
+    private var isVideo: Bool { videoChoice ?? images.isEmpty }
 
     private var options: OptimizeOptions { settings.optimize }
+    private var videoOptions: VideoOptions { settings.optimizeVideo }
     private var stale: Bool {
-        runner.encodedKey != nil && (runner.encodedKey != options.encodingKey || runner.results.count != targets.count)
+        runner.encodedKey != nil && (runner.encodedKey != encodingKey || runner.results.count != targets.count)
+    }
+
+    // The settings in use, whichever kind is being optimized.
+    private var encodingKey: String { isVideo ? videoOptions.encodingKey : options.encodingKey }
+    private var codecID: String { isVideo ? videoOptions.codec.rawValue : options.codec.rawValue }
+    private var codecTitle: String { isVideo ? videoOptions.codec.title : options.codec.title }
+    private var fileExtension: String { isVideo ? videoOptions.codec.fileExtension : options.codec.fileExtension }
+    private var codecAvailable: Bool { isVideo || options.codec.isAvailable }
+    private var destination: OptimizeDestination { isVideo ? videoOptions.destination : options.destination }
+    private var onlyIfSmaller: Bool { isVideo ? videoOptions.onlyIfSmaller : options.onlyIfSmaller }
+
+    private func info(for source: ImageItem) -> OptimizationInfo {
+        isVideo ? OptimizationInfo(video: videoOptions, source: source) : OptimizationInfo(options: options, source: source)
     }
 
     /// The original each image hangs from: optimizing a version links the result to its original.
@@ -24,25 +44,44 @@ struct OptimizeSheet: View {
         library.original(of: item, in: albumID) ?? item
     }
 
-    /// Images that already have a version in the chosen format.
+    /// The images, or the videos, of the batch.
+    private var pool: [ImageItem] { isVideo ? videos : images }
+
+    /// Those that already have a version in the chosen format.
     private var alreadyOptimized: [ImageItem] {
-        items.filter { item in
-            library.versions(of: root(of: item).id, in: albumID).contains { $0.optimization?.codecID == options.codec.rawValue }
+        pool.filter { item in
+            library.versions(of: root(of: item).id, in: albumID).contains { $0.optimization?.codecID == codecID }
         }
     }
 
-    /// What gets encoded: all of `items`, or those without a version in this format yet.
+    /// What gets encoded: the whole pool, or those without a version in this format yet.
     private var targets: [ImageItem] {
-        guard settings.skipOptimized else { return items }
+        guard settings.skipOptimized else { return pool }
         let skip = Set(alreadyOptimized.map(\.id))
-        return items.filter { !skip.contains($0.id) }
+        return pool.filter { !skip.contains($0.id) }
     }
 
     var body: some View {
         HStack(spacing: 0) {
             ScrollView {
-                OptimizeSettingsForm(options: $settings.optimize)
-                    .padding(20)
+                VStack(alignment: .leading, spacing: 18) {
+                    if !images.isEmpty && !videos.isEmpty {
+                        SegmentedControl(options: [(tr("Imágenes (%d)", images.count), false),
+                                                   (tr("Vídeos (%d)", videos.count), true)],
+                                         selection: Binding(get: { isVideo }, set: { choice in
+                                             guard choice != isVideo else { return }
+                                             videoChoice = choice
+                                             comparing = nil
+                                             runner.reset()
+                                         }), expand: true)
+                    }
+                    if isVideo {
+                        VideoSettingsForm(options: $settings.optimizeVideo)
+                    } else {
+                        OptimizeSettingsForm(options: $settings.optimize)
+                    }
+                }
+                .padding(20)
             }
             .frame(width: 330)
             .background(Theme.sidebar)
@@ -68,8 +107,9 @@ struct OptimizeSheet: View {
         .font(.system(size: 13))
         .preferredColorScheme(.dark)
         .onAppear {
-            // A whole album can be hundreds of images: wait for "Try" instead of starting at once.
-            if targets.count <= 12 { encode() }
+            // A whole album can be hundreds of images, and one video can take minutes:
+            // wait for "Try" instead of starting at once.
+            if !isVideo && targets.count <= 12 { encode() }
         }
         .onDisappear { runner.cleanup() }
         .alert(message ?? "", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
@@ -82,7 +122,8 @@ struct OptimizeSheet: View {
     private var resultsHeader: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(tr("Optimizar %d imágenes", targets.count)).font(.system(size: 16, weight: .semibold))
+                Text(isVideo ? tr("Optimizar %d vídeos", targets.count) : tr("Optimizar %d imágenes", targets.count))
+                    .font(.system(size: 16, weight: .semibold))
                 if runner.results.isEmpty || stale {
                     Text(stale ? tr("Los ajustes cambiaron: vuelve a probar para ver el resultado.") : tr("Pulsa «Probar» para ver cuánto ocupan."))
                         .font(.system(size: 12)).foregroundStyle(stale ? Theme.warn : Theme.text3)
@@ -106,7 +147,7 @@ struct OptimizeSheet: View {
                     Label(tr("Probar"), systemImage: "play.fill")
                 }
                 .buttonStyle(.appSecondary)
-                .disabled(!options.codec.isAvailable)
+                .disabled(!codecAvailable)
             }
         }
         .padding(.horizontal, 20)
@@ -117,7 +158,7 @@ struct OptimizeSheet: View {
     private var skipBar: some View {
         HStack(spacing: 10) {
             Image(systemName: "square.stack.3d.up").foregroundStyle(Theme.accentText)
-            Text(tr("%d ya tienen una versión %@.", alreadyOptimized.count, options.codec.title))
+            Text(tr("%d ya tienen una versión %@.", alreadyOptimized.count, codecTitle))
                 .foregroundStyle(Theme.text2)
             Spacer()
             Toggle(tr("Omitirlas"), isOn: $settings.skipOptimized)
@@ -152,7 +193,8 @@ struct OptimizeSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 2) {
                 Text(result.item.fileName).lineLimit(1).truncationMode(.middle)
-                Text("\(result.item.formatLabel) · \(result.item.dimensions)")
+                Text(([result.item.formatLabel, result.item.dimensions]
+                      + (result.item.duration.map { [Format.duration($0)] } ?? [])).joined(separator: " · "))
                     .font(.system(size: 11)).foregroundStyle(Theme.text3)
             }
             Spacer()
@@ -202,7 +244,7 @@ struct OptimizeSheet: View {
             }
             CompareView(original: result.source, optimized: output,
                         originalLabel: tr("Original · %@", Format.bytes(result.item.bytes)),
-                        optimizedLabel: "\(options.codec.title) · \(Format.bytes(result.outputBytes ?? 0))")
+                        optimizedLabel: "\(codecTitle) · \(Format.bytes(result.outputBytes ?? 0))")
                 .contextMenu {
                     Button(tr("Copiar original")) { Clipboard.copy([result.source]) }
                     Button(tr("Copiar optimizada")) { Clipboard.copy([output]) }
@@ -231,7 +273,7 @@ struct OptimizeSheet: View {
     }
 
     private var saveTitle: String {
-        switch options.destination {
+        switch destination {
         case .copyInAlbum: return tr("Guardar copias")
         case .replace: return tr("Reemplazar originales")
         case .exportFolder: return tr("Exportar…")
@@ -239,28 +281,41 @@ struct OptimizeSheet: View {
     }
 
     private var destinationHint: String {
-        options.onlyIfSmaller ? tr("Se omiten las que no ocupen menos que el original.") : ""
+        onlyIfSmaller ? tr("Se omiten las que no ocupen menos que el original.") : ""
     }
 
     private func encode() {
         let targets = self.targets
-        guard options.codec.isAvailable, !targets.isEmpty else {
+        guard codecAvailable, !targets.isEmpty else {
             runner.reset()
             return
         }
         comparing = nil
-        runner.start(targets.map { ($0, library.url(of: $0, in: albumID)) }, options: options)
+        let files = targets.map { ($0, library.url(of: $0, in: albumID)) }
+        if isVideo {
+            // Video encoders already use every core: one or two at a time is plenty.
+            let options = videoOptions
+            runner.start(files, key: options.encodingKey, limit: 2) {
+                try await VideoEncoder.encode($0, options: options, in: $1)
+            }
+        } else {
+            let options = self.options
+            runner.start(files, key: options.encodingKey) {
+                try await ImageEncoder.encode($0, options: options, in: $1)
+            }
+        }
     }
 
     private func save() {
         let done = runner.results.filter { $0.status == .done && $0.output != nil }
-        let accepted = done.filter { !options.onlyIfSmaller || $0.isSmaller }
+        let accepted = done.filter { !onlyIfSmaller || $0.isSmaller }
+        let destination = self.destination
         let skipped = done.count - accepted.count
         var errors: [String] = []
         var saved = 0
 
         var exportDirectory: URL?
-        if options.destination == .exportFolder {
+        if destination == .exportFolder {
             let panel = NSOpenPanel()
             panel.canChooseDirectories = true
             panel.canChooseFiles = false
@@ -273,16 +328,16 @@ struct OptimizeSheet: View {
         for result in accepted {
             guard let output = result.output else { continue }
             do {
-                switch options.destination {
+                switch destination {
                 case .copyInAlbum:
                     // Linked to the original, so it shows among that image's versions.
                     let original = root(of: result.item)
                     try library.addFile(at: output, into: albumID, name: output.lastPathComponent,
                                         sourceID: original.id,
-                                        optimization: OptimizationInfo(options: options, source: original))
+                                        optimization: info(for: original))
                 case .replace:
-                    try library.replace(result.item.id, in: albumID, with: output, fileExtension: options.codec.fileExtension,
-                                        optimization: OptimizationInfo(options: options, source: result.item))
+                    try library.replace(result.item.id, in: albumID, with: output, fileExtension: fileExtension,
+                                        optimization: info(for: result.item))
                 case .exportFolder:
                     guard let exportDirectory else { continue }
                     let name = Library.uniqueName(output.lastPathComponent, in: exportDirectory)
@@ -389,28 +444,10 @@ struct OptimizeSettingsForm: View {
 
             Rectangle().fill(Theme.line).frame(height: 1)
 
-            VStack(alignment: .leading, spacing: 8) {
-                SectionLabel(tr("Al guardar"))
-                SegmentedControl(options: [
-                    (tr("Copia"), OptimizeDestination.copyInAlbum),
-                    (tr("Reemplazar"), OptimizeDestination.replace),
-                    (tr("Carpeta"), OptimizeDestination.exportFolder),
-                ], selection: $options.destination, expand: true)
-                Text(destinationDetail).font(.system(size: 11)).foregroundStyle(Theme.text3)
-                    .fixedSize(horizontal: false, vertical: true)
-                SwitchRow(title: tr("Solo si ocupa menos"), isOn: $options.onlyIfSmaller)
-            }
+            SaveSettings(destination: $options.destination, onlyIfSmaller: $options.onlyIfSmaller)
 
             Button(tr("Valores de Squoosh")) { options.selectCodec(options.codec) }
                 .buttonStyle(AppButtonStyle(kind: .ghost, height: 26))
-        }
-    }
-
-    private var destinationDetail: String {
-        switch options.destination {
-        case .copyInAlbum: return tr("Añade la versión optimizada al álbum junto a la original.")
-        case .replace: return tr("Cambia la original por la optimizada. La original va a la papelera.")
-        case .exportFolder: return tr("Escribe las optimizadas en la carpeta que elijas; el álbum no cambia.")
         }
     }
 
@@ -461,6 +498,67 @@ struct OptimizeSettingsForm: View {
                 .frame(height: 28)
                 .background(Theme.field, in: RoundedRectangle(cornerRadius: 6))
                 .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.lineStrong) }
+        }
+    }
+}
+
+/// Video settings: codec and output size (macOS's export presets decide the bitrate).
+struct VideoSettingsForm: View {
+    @Binding var options: VideoOptions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel(tr("Formato"))
+                SegmentedControl(options: VideoCodec.allCases.map { ($0.title, $0) },
+                                 selection: Binding(get: { options.codec }, set: { options.selectCodec($0) }),
+                                 expand: true)
+                Text(options.codec == .hevc ? tr("MP4 más pequeño. Lo reproducen Safari y los navegadores recientes.")
+                                            : tr("MP4 compatible con todo, pero ocupa más."))
+                    .font(.system(size: 11)).foregroundStyle(Theme.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel(tr("Resolución"))
+                SegmentedControl(options: VideoSize.available(for: options.codec).map { ($0.title, $0) },
+                                 selection: $options.size, expand: true)
+                Text(tr("Nunca se agranda. macOS elige la tasa de bits de cada resolución."))
+                    .font(.system(size: 11)).foregroundStyle(Theme.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Rectangle().fill(Theme.line).frame(height: 1)
+
+            SaveSettings(destination: $options.destination, onlyIfSmaller: $options.onlyIfSmaller)
+        }
+    }
+}
+
+/// "On save": copy in the album, replace the original or export, and the size check.
+struct SaveSettings: View {
+    @Binding var destination: OptimizeDestination
+    @Binding var onlyIfSmaller: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(tr("Al guardar"))
+            SegmentedControl(options: [
+                (tr("Copia"), OptimizeDestination.copyInAlbum),
+                (tr("Reemplazar"), OptimizeDestination.replace),
+                (tr("Carpeta"), OptimizeDestination.exportFolder),
+            ], selection: $destination, expand: true)
+            Text(detail).font(.system(size: 11)).foregroundStyle(Theme.text3)
+                .fixedSize(horizontal: false, vertical: true)
+            SwitchRow(title: tr("Solo si ocupa menos"), isOn: $onlyIfSmaller)
+        }
+    }
+
+    private var detail: String {
+        switch destination {
+        case .copyInAlbum: return tr("Añade la versión optimizada al álbum junto a la original.")
+        case .replace: return tr("Cambia la original por la optimizada. La original va a la papelera.")
+        case .exportFolder: return tr("Escribe las optimizadas en la carpeta que elijas; el álbum no cambia.")
         }
     }
 }

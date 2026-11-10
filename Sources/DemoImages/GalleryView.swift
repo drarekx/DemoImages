@@ -56,6 +56,8 @@ struct GalleryView: View {
         return settings.sortDescending ? ascending.reversed() : ascending
     }
 
+    private var hasVideos: Bool { album?.images.contains(where: \.isVideo) ?? false }
+
     private var selectedItems: [ImageItem] { items.filter { selection.contains($0.id) } }
 
     var body: some View {
@@ -124,7 +126,8 @@ struct GalleryView: View {
                         renamingAlbum = true
                     }
                     .help(tr("Doble clic para renombrar"))
-                Text(tr("%d imágenes · %@", album?.images.count ?? 0, Format.bytes(album?.totalBytes ?? 0)))
+                let (count, size) = (album?.images.count ?? 0, Format.bytes(album?.totalBytes ?? 0))
+                Text(hasVideos ? tr("%d elementos · %@", count, size) : tr("%d imágenes · %@", count, size))
                     .font(.system(size: 12)).foregroundStyle(Theme.text3)
             }
             Spacer()
@@ -309,6 +312,15 @@ struct GalleryView: View {
                             .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 4))
                             .padding(8)
                     }
+                    .overlay(alignment: .bottomTrailing) {
+                        if let duration = item.duration {
+                            Label(Format.duration(duration), systemImage: "play.fill")
+                                .font(.system(size: 10, weight: .semibold)).monospacedDigit()
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 4))
+                                .padding(8)
+                        }
+                    }
                 if selected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 20))
@@ -378,7 +390,7 @@ struct GalleryView: View {
         VStack(spacing: 12) {
             Image(systemName: "square.and.arrow.down.on.square")
                 .font(.system(size: 38, weight: .light)).foregroundStyle(Theme.text3)
-            Text(tr("Arrastra imágenes o carpetas aquí")).font(.system(size: 16, weight: .semibold))
+            Text(tr("Arrastra imágenes, vídeos o carpetas aquí")).font(.system(size: 16, weight: .semibold))
             Text(tr("También puedes pegarlas con ⌘V o usar el botón «Añadir imágenes»."))
                 .foregroundStyle(Theme.text2)
             Button(tr("Añadir imágenes"), action: chooseFilesToImport)
@@ -393,7 +405,7 @@ struct GalleryView: View {
         let selected = selectedItems
         return HStack {
             if selected.isEmpty {
-                Text(tr("%d imágenes", items.count))
+                Text(hasVideos ? tr("%d elementos", items.count) : tr("%d imágenes", items.count))
             } else {
                 Text(tr("%d seleccionadas · %@", selected.count, Format.bytes(selected.reduce(0) { $0 + $1.bytes })))
             }
@@ -456,9 +468,9 @@ struct GalleryView: View {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.image, .folder]
+        panel.allowedContentTypes = [.image, .movie, .folder]
         panel.prompt = tr("Añadir")
-        panel.message = tr("Elige imágenes o carpetas con imágenes.")
+        panel.message = tr("Elige imágenes, vídeos o carpetas.")
         guard panel.runModal() == .OK else { return }
         importURLs(panel.urls)
     }
@@ -543,7 +555,7 @@ struct VersionBadge: View {
             // A version: compare with its original (or the size it had, if the original is gone).
             let before = original?.bytes ?? info.sourceBytes
             badge(symbol: "wand.and.stars",
-                  text: "\(info.codec?.title ?? info.codecID.uppercased()) · \(Format.change(from: before, to: item.bytes))",
+                  text: "\(info.title) · \(Format.change(from: before, to: item.bytes))",
                   good: item.bytes < before)
         }
     }

@@ -22,9 +22,15 @@ final class ThumbnailCache: @unchecked Sendable {
 
     func thumbnail(for url: URL, maxPixel: Int) async -> NSImage? {
         if let hit = cached(url, maxPixel: maxPixel) { return hit }
-        let image: NSImage? = await withCheckedContinuation { continuation in
-            queue.addOperation {
-                continuation.resume(returning: Self.decode(url, maxPixel: maxPixel))
+        let image: NSImage?
+        if VideoFile.isVideo(url) {
+            Library.requestDownload(url)
+            image = await VideoFile.frame(url, maxPixel: maxPixel)
+        } else {
+            image = await withCheckedContinuation { continuation in
+                queue.addOperation {
+                    continuation.resume(returning: Self.decode(url, maxPixel: maxPixel))
+                }
             }
         }
         if let image { cache.setObject(image, forKey: key(url, maxPixel)) }
@@ -58,7 +64,7 @@ enum ThumbnailSize {
     static let small = 120
 }
 
-/// Image thumbnail, aspect-fit, decoded in the background.
+/// Thumbnail of an image or a video frame, aspect-fit, decoded in the background.
 struct Thumbnail: View {
     let url: URL
     var maxPixel = ThumbnailSize.grid

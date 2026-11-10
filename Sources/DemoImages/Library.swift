@@ -3,7 +3,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// One image stored in an album.
+/// One image or video stored in an album.
 struct ImageItem: Codable, Identifiable, Hashable {
     var id = UUID()
     /// File name inside the album's folder.
@@ -14,6 +14,8 @@ struct ImageItem: Codable, Identifiable, Hashable {
     var height: Int
     /// Uniform type identifier detected by ImageIO (e.g. `public.png`).
     var typeID: String
+    /// Length in seconds. Only videos have one.
+    var duration: Double? = nil
     /// The original this file was optimized from, in the same album.
     var sourceID: UUID? = nil
     /// How the optimizer made this file (nil for imported files).
@@ -31,6 +33,8 @@ struct ImageItem: Codable, Identifiable, Hashable {
     }
 
     var dimensions: String { "\(width)×\(height)" }
+
+    var isVideo: Bool { duration != nil }
 }
 
 struct Album: Codable, Identifiable, Hashable {
@@ -50,7 +54,7 @@ enum LibraryError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notAnImage(let name): return tr("%@ no es una imagen que se pueda leer.", name)
+        case .notAnImage(let name): return tr("%@ no es una imagen ni un vídeo que se pueda leer.", name)
         case .missingAlbum: return tr("El álbum ya no existe.")
         case .locationInsideLibrary: return tr("La nueva ubicación no puede estar dentro de la biblioteca actual.")
         case .destinationNotEmpty(let path): return tr("En %@ ya hay archivos de otra biblioteca a medias. Elige otra carpeta.", path)
@@ -490,7 +494,7 @@ final class Library: ObservableObject {
         return added
     }
 
-    /// Image files to import: the files themselves and, for folders, every image inside.
+    /// Files to import: the files themselves and, for folders, every image and video inside.
     nonisolated private static func expand(_ urls: [URL]) -> [URL] {
         var files: [URL] = []
         for url in urls {
@@ -501,7 +505,7 @@ final class Library: ObservableObject {
                     at: url, includingPropertiesForKeys: [.isRegularFileKey],
                     options: [.skipsHiddenFiles, .skipsPackageDescendants])
                 while let file = enumerator?.nextObject() as? URL {
-                    if isImageFile(file) { files.append(file) }
+                    if isImageFile(file) || VideoFile.isVideo(file) { files.append(file) }
                 }
             } else {
                 files.append(url)
@@ -520,8 +524,8 @@ final class Library: ObservableObject {
         var items: [ImageItem] = []
         var failed: [String] = []
         for file in files {
-            // Check before copying so non-images never land in the album.
-            guard readImageInfo(file) != nil else {
+            // Check before copying so unreadable files never land in the album.
+            guard makeItem(for: file) != nil else {
                 failed.append(file.lastPathComponent)
                 continue
             }
@@ -691,8 +695,13 @@ final class Library: ObservableObject {
     }
 
     nonisolated static func makeItem(for url: URL) -> ImageItem? {
-        guard let info = readImageInfo(url) else { return nil }
         let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        if VideoFile.isVideo(url) {
+            guard let video = VideoFile.infoBlocking(url) else { return nil }
+            return ImageItem(fileName: url.lastPathComponent, bytes: Int64(bytes), width: video.width,
+                             height: video.height, typeID: video.typeID, duration: video.duration)
+        }
+        guard let info = readImageInfo(url) else { return nil }
         return ImageItem(fileName: url.lastPathComponent, bytes: Int64(bytes),
                          width: info.width, height: info.height, typeID: info.typeID)
     }

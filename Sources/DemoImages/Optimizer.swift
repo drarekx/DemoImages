@@ -105,6 +105,8 @@ struct OptimizationInfo: Codable, Hashable {
     var sourceFormat: String
     var sourceDimensions: String
     var date = Date()
+    /// Extra setting shown in the summary (a video's output size: "1080p").
+    var detail: String? = nil
 
     init(options: OptimizeOptions, source: ImageItem) {
         let codec = options.codec
@@ -119,11 +121,26 @@ struct OptimizationInfo: Codable, Hashable {
         sourceDimensions = source.dimensions
     }
 
+    init(video options: VideoOptions, source: ImageItem) {
+        codecID = options.codec.rawValue
+        lossless = false
+        resized = false
+        quantized = false
+        detail = options.size == .original ? nil : options.size.title
+        sourceBytes = source.bytes
+        sourceFormat = source.formatLabel
+        sourceDimensions = source.dimensions
+    }
+
     var codec: Codec? { Codec(rawValue: codecID) }
+
+    /// "WebP", "HEVC"…
+    var title: String { codec?.title ?? VideoCodec(rawValue: codecID)?.title ?? codecID.uppercased() }
 
     /// "WebP · calidad 75 · esfuerzo 4"
     var summary: String {
-        var parts = [codec?.title ?? codecID.uppercased()]
+        var parts = [title]
+        if let detail { parts.append(detail) }
         if lossless {
             parts.append(tr("sin pérdida"))
         } else if let quality {
@@ -394,15 +411,18 @@ final class OptimizeRunner: ObservableObject {
     var totalBefore: Int64 { results.reduce(0) { $0 + $1.item.bytes } }
     var totalAfter: Int64 { results.reduce(0) { $0 + ($1.outputBytes ?? $1.item.bytes) } }
 
-    func start(_ items: [(ImageItem, URL)], options: OptimizeOptions) {
+    /// `key` identifies the settings used; `encode` turns a source file into a file in
+    /// the given directory; `limit` caps how many run at once.
+    func start(_ items: [(ImageItem, URL)], key: String, limit: Int = 4,
+               encode: @escaping @Sendable (_ source: URL, _ directory: URL) async throws -> URL) {
         cancel()
         try? FileManager.default.removeItem(at: workDirectory)
         results = items.map { OptimizeResult(item: $0.0, source: $0.1) }
-        encodedKey = options.encodingKey
+        encodedKey = key
         running = true
         let jobs = results.enumerated().map { ($0.offset, $0.element.source, $0.element.id) }
         let base = workDirectory
-        let limit = max(1, min(4, ProcessInfo.processInfo.activeProcessorCount / 2))
+        let limit = max(1, min(limit, ProcessInfo.processInfo.activeProcessorCount / 2))
 
         task = Task { [weak self] in
             await withTaskGroup(of: (Int, Result<URL, Error>).self) { group in
@@ -411,7 +431,7 @@ final class OptimizeRunner: ObservableObject {
                     group.addTask {
                         let directory = base.appendingPathComponent(job.2.uuidString, isDirectory: true)
                         do {
-                            return (job.0, .success(try await ImageEncoder.encode(job.1, options: options, in: directory)))
+                            return (job.0, .success(try await encode(job.1, directory)))
                         } catch {
                             return (job.0, .failure(error))
                         }
