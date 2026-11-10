@@ -1,6 +1,6 @@
 # DemoImages
 
-Tu almacén de imágenes de prueba para macOS. Guarda las imágenes que usas para probar cosas (subidas, avatares, fondos, PNG con transparencia, fotos enormes…) ordenadas en álbumes, para no volver a descargarlas cada vez, y optimízalas a formatos modernos con los mismos codificadores que [Squoosh](https://squoosh.app).
+Tu almacén de imágenes y vídeos de prueba para macOS. Guarda los archivos que usas para probar cosas (subidas, avatares, fondos, PNG con transparencia, fotos enormes, clips de vídeo…) ordenados en álbumes, para no volver a descargarlos cada vez, y optimízalos a formatos modernos: las imágenes con los mismos codificadores que [Squoosh](https://squoosh.app) y los vídeos a HEVC o H.264.
 
 ## Instalar
 
@@ -25,14 +25,15 @@ Requisitos: macOS 14 (Sonoma) o posterior. Apple Silicon o Intel.
 ## Qué hace
 
 - **Álbumes** con nombre: crear, renombrar (doble clic en el título) y eliminar (van a la papelera).
-- **Añadir imágenes**: botón, arrastrar archivos o carpetas enteras, pegar con ⌘V (archivos copiados en Finder o una captura copiada al portapapeles), arrastrarlas al icono del Dock o «Abrir con».
-- **Galería** con miniaturas, tamaño ajustable, fondo de cuadros para ver la transparencia, formato, dimensiones y peso de cada imagen; búsqueda por nombre o formato (`webp`, `png`…) y orden por fecha, nombre, tamaño o dimensiones.
+- **Añadir imágenes y vídeos** (MP4, MOV, M4V y lo que macOS sepa leer): botón, arrastrar archivos o carpetas enteras, pegar con ⌘V (archivos copiados en Finder o una captura copiada al portapapeles), arrastrarlas al icono del Dock o «Abrir con».
+- **Galería** con miniaturas, tamaño ajustable, fondo de cuadros para ver la transparencia, formato, dimensiones y peso de cada archivo (y duración en los vídeos); búsqueda por nombre o formato (`webp`, `png`, `mp4`…) y orden por fecha, nombre, tamaño o dimensiones.
 - **Selección** con clic, ⌘-clic, ⇧-clic, ⌘A o «Seleccionar todo»; el pie muestra cuántas hay y cuánto ocupan.
-- **Visor** a pantalla completa (doble clic): ← / → para pasar, `0` para ver al 100 %, Esc para cerrar. Arriba se ve claramente qué archivo es (formato, original o versión, tamaño, % frente al original y ajustes); la imagen y cada fila del panel de versiones se pueden arrastrar fuera de la app (a un formulario web, al Finder…).
-- **Copiar o mover** las seleccionadas a una carpeta del Mac o a otro álbum. ⌘C o botón derecho → «Copiar» (en la galería, en el visor, en cada versión y en la comparación) copia el archivo y la imagen: en el Finder se pega el archivo y en un formulario web, chat o documento, la imagen. También se pueden arrastrar fuera de la app.
+- **Visor** a pantalla completa (doble clic): ← / → para pasar, `0` para ver al 100 %, Esc para cerrar. Los vídeos se reproducen ahí mismo (Espacio reproduce o pausa). Arriba se ve claramente qué archivo es (formato, original o versión, tamaño, % frente al original y ajustes); la imagen y cada fila del panel de versiones se pueden arrastrar fuera de la app (a un formulario web, al Finder…).
+- **Copiar o mover** las seleccionadas a una carpeta del Mac o a otro álbum. ⌘C o botón derecho → «Copiar» (en la galería, en el visor, en cada versión y en la comparación) copia el archivo y la imagen: en el Finder se pega el archivo y en un formulario web, chat o documento, la imagen (de un vídeo se copia solo el archivo). También se pueden arrastrar fuera de la app.
 - **Optimizar** (como Squoosh): WebP, AVIF, JPEG XL, MozJPEG, PNG (OxiPNG + reducción de paleta) y HEIC, con calidad, esfuerzo, sin pérdida y redimensionado Lanczos. Primero **prueba** y ves el peso antes/después de cada imagen y un **comparador** con cortinilla; luego guardas como copia en el álbum, reemplazas las originales (van a la papelera) o exportas a una carpeta. Por defecto se omiten las que no salen más pequeñas.
 - **Versiones**: cada imagen optimizada como copia queda enlazada a su original. En la galería las versiones se agrupan dentro del original («3 versiones · mejor −72 %»; se puede desagrupar desde el menú de orden) y el visor muestra a la derecha el original y todas sus versiones con tamaño, % de ahorro y ajustes usados; ↑ / ↓ cambian de versión y C la compara con el original. En la comparación (cortinilla) se amplía con la rueda o pellizcando, hacia el puntero, hasta 32×; se mueve arrastrando la imagen o con dos dedos; doble clic alterna entre ajustada y píxeles reales (1:1). Mover, copiar o borrar un original arrastra sus versiones.
-- **Optimizar un álbum entero** con «Optimizar álbum…»: se omiten las imágenes que ya tienen una versión en el formato elegido (se puede desactivar).
+- **Vídeos**: se guardan en los álbumes junto a las imágenes, con miniatura y duración, y se reproducen en el visor. Se optimizan a **HEVC** o **H.264** (MP4) con los ajustes de exportación de macOS, eligiendo la resolución (original, 4K, 1080p, 720p, 540p; nunca se agranda), sin instalar nada. Las versiones quedan enlazadas al original igual que con las imágenes y la comparación con cortinilla se hace sobre un fotograma. Si se optimizan imágenes y vídeos a la vez, la hoja tiene una pestaña para cada tipo.
+- **Optimizar un álbum entero** con «Optimizar álbum…»: se omiten las imágenes y los vídeos que ya tienen una versión en el formato elegido (se puede desactivar).
 - **Dónde se guardan**: por defecto en el Mac, o en **iCloud Drive** (Ajustes → «Usar iCloud Drive») o en cualquier carpeta. En iCloud la misma biblioteca se usa desde varios Mac: los cambios del otro aparecen en unos segundos y, si los dos cambian algo a la vez, se combinan. Las imágenes que aún no han llegado de iCloud se ven como «Esperando a iCloud». Al cambiar, la biblioteca se mueve entera; si la carpeta ya tiene una biblioteca (por ejemplo, la de otro Mac en iCloud), se abre esa. Debajo de la barra lateral se ve siempre dónde está y cuánto ocupa todo.
 - **Idiomas**: castellano, inglés y catalán.
 
@@ -46,12 +47,13 @@ Requisitos: macOS 14 (Sonoma) o posterior. Apple Silicon o Intel.
 | JPEG | MozJPEG (`cjpeg`) | ImageIO |
 | PNG | OxiPNG, `pngquant` para la paleta | ImageIO |
 | HEIC | ImageIO | ✓ |
+| HEVC, H.264 (vídeo, MP4) | AVFoundation | ✓ |
 
-Los valores por defecto son los de Squoosh (WebP 75 y esfuerzo 4, AVIF 50 y esfuerzo 4, JPEG XL 75 y esfuerzo 7, MozJPEG 75, OxiPNG nivel 2, 256 colores con tramado 1). El botón **Valores de Squoosh** los recupera.
+Los valores por defecto son los de Squoosh (WebP 75 y esfuerzo 4, AVIF 50 y esfuerzo 4, JPEG XL 75 y esfuerzo 7, MozJPEG 75, OxiPNG nivel 2, 256 colores con tramado 1). El botón **Valores de Squoosh** los recupera. En los vídeos no hay calidad ni esfuerzo: macOS elige la tasa de bits según la resolución. WebM y MKV no se pueden importar (macOS no los lee).
 
 ## Dónde guarda las cosas
 
-- Imágenes: `<biblioteca>/Albums/<id del álbum>/`
+- Imágenes y vídeos: `<biblioteca>/Albums/<id del álbum>/`
 - Índice de álbumes: `<biblioteca>/library.json`
 - `<biblioteca>` es `~/Library/Application Support/DemoImages` por defecto, o la carpeta elegida en Ajustes (en iCloud Drive: `iCloud Drive/DemoImages`).
 - Ajustes: `defaults read com.egluu.demoimages`
